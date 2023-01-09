@@ -3,19 +3,17 @@
 
 MAX_FILES = 50
 
+import glob
 import logging
 import os
 import sys
-import shutil
-import glob
-
 # Set project path two levels up
 from pathlib import Path
 from typing import List
 
 import numpy as np
 import pandas as pd
-import prody # MH can rewrite with Biotite?
+import prody  # MH can rewrite with Biotite?
 import xgboost as xgb
 from Bio import SeqIO
 from sklearn import metrics
@@ -24,35 +22,30 @@ ROOT_PATH = str(os.path.dirname(os.getcwd()))
 
 from argparse import ArgumentParser, RawTextHelpFormatter
 
-# Import make_dataset scripts
-from make_dataset import Discotope_Dataset, embed_pdbs_IF1, save_fasta_from_pdbs
-
 import requests
 from Bio.PDB import PDBIO, Select
-from Bio.PDB.PDBParser import PDBParser
 from Bio.PDB.mmcifio import MMCIFIO
+from Bio.PDB.PDBParser import PDBParser
+
+# Import make_dataset scripts
+from make_dataset import (Discotope_Dataset, embed_pdbs_IF1,
+                          save_fasta_from_pdbs)
+
 
 def cmdline_args():
     # Make parser object
-    #TODO: Update usage text
     usage = f"""
     # Predict on example PDBs in folder
-    python predict_pdb.py \
+    python src/predict_pdb.py \
     --pdb_dir data/test \
+    --struc_type solved \
     --out_dir job_out/test
 
     # Predict only on PDBs IDs specified in antigens.fasta entries
-    python webserver/predict_pdb.py \
+    python src/predict_pdb.py \
     --fasta data/test.fasta \
     --pdb_dir pdbs_embeddings \
     --out_dir job_out/test
-
-    # Predict on prepared train set 1
-    python webserver/predict_pdb.py \
-    --fasta data/raw/bp3_train_0_to_375__1_of_3.fasta \
-    --pdb_dir data/raw/af2_pdbs \
-    --models_dir models/train__1_2 \
-    --out_dir job_out/train__1
     """
     p = ArgumentParser(
         description="Predict Discotope-3.0 score on folder of input AF2 PDBs",
@@ -67,20 +60,22 @@ def cmdline_args():
             return arg
 
     p.add_argument(
-        "--f",
-        help="Input file",
-        metavar="FILE",
+        "-f",
+        "--in_file",
+        dest="pdb_or_zip_file",
+        help="Input file, either single PDB or compressed zip file with multiple PDBs",
         type=lambda x: is_valid_path(p, x),
     )
 
     p.add_argument(
-        "--list",
-        help="ID List",
+        "--list_file",
+        help="File with PDB or Uniprot IDs, fetched from RCSB/AlphaFolddb",
     )
 
     p.add_argument(
         "--struc_type",
-        help="Structure type from file (solved or alphafold)",
+        required=True,
+        help="Structure type from file (solved | alphafold)",
     )
 
     p.add_argument(
@@ -90,30 +85,31 @@ def cmdline_args():
 
     p.add_argument(
         "--pdb_dir",
-        default="data/raw/af2_pdbs",
+        default="data/pdbs",
         help="Directory with AF2 PDBs",
-        metavar="FOLDER",
-        type=lambda x: is_valid_path(p, x),
+        #type=lambda x: is_valid_path(p, x),
     )
+
     p.add_argument(
         "--out_dir",
-        default=False,
+        default="job_out/job1",
         help="Job output directory",
-        metavar="FOLDER",
     )
+
     p.add_argument(
         "--models_dir",
-        default="/tools/src/discotope-3.0/discotope3/models/bp3_train_seqs",
-        help="Path for .npy file containing trained XGBoost ensemble",
-        metavar="FOLDER",
+        default="models/",
+        help="Path for .json files containing trained XGBoost ensemble",
         type=lambda x: is_valid_path(p, x),
     )
+
     p.add_argument(
         "--skip_embeddings",
         help="Skip ESM-IF1 embedding step (False)",
         default=False,
         type=bool,
     )
+
     p.add_argument(
         "--overwrite_embeddings",
         dest="overwrite_embeddings",
@@ -125,8 +121,6 @@ def cmdline_args():
     return p.parse_args()
 
 
-import xgboost as xgb
-
 def get_percentile_score(
     df: pd.DataFrame,
     col: str,
@@ -137,6 +131,7 @@ def get_percentile_score(
     c_percentile = (c > df[col]).mean()
 
     return c_percentile, c
+
 
 def load_models(
     models_dir: str = "models/final__solved_pred/",
@@ -165,6 +160,7 @@ def load_models(
         models.append(m)
 
     return models
+
 
 def predict_using_models(
     models: List[xgb.XGBClassifier],
@@ -243,7 +239,7 @@ def save_predictions_from_dataset(
         struc = prody.parsePDB(sample["pdb_fp"])
 
         d = {
-            #"epi": sample["y_arr"],
+            # "epi": sample["y_arr"],
             "raw": y_hat,
         }
 
@@ -252,20 +248,49 @@ def save_predictions_from_dataset(
                 bfacs = ((values - values.min()) / (values.max() - values.min())) * 100
                 struc = prody_set_bfactor(struc, bfacs)
                 prody.writePDB(f"{out_dir}/{sample['pdb_id']}_{label}.pdb", struc)
-                #print(f"Outfile: {out_dir}/{sample['pdb_id']}_{label}.pdb")
+                # print(f"Outfile: {out_dir}/{sample['pdb_id']}_{label}.pdb")
                 p = PDBParser(PERMISSIVE=1)
-                structure = p.get_structure(f"{sample['pdb_id']}_{label}", f"{out_dir}/{sample['pdb_id']}_{label}.pdb")
-                io=MMCIFIO()
+                structure = p.get_structure(
+                    f"{sample['pdb_id']}_{label}",
+                    f"{out_dir}/{sample['pdb_id']}_{label}.pdb",
+                )
+                io = MMCIFIO()
                 io.set_structure(structure)
-                io.save(f"{out_dir}/{sample['pdb_id']}_{label}.tmp.cif", Clean_Chain(bfacs))
-                with open(f"{out_dir}/{sample['pdb_id']}_{label}.tmp.cif", "r") as infile, open(f"{out_dir}/{sample['pdb_id']}_{label}.cif", "w") as outfile:
+                io.save(
+                    f"{out_dir}/{sample['pdb_id']}_{label}.tmp.cif", Clean_Chain(bfacs)
+                )
+                with open(
+                    f"{out_dir}/{sample['pdb_id']}_{label}.tmp.cif", "r"
+                ) as infile, open(
+                    f"{out_dir}/{sample['pdb_id']}_{label}.cif", "w"
+                ) as outfile:
                     outfile.write(infile.readline())
-                    print("#", "loop_", "_ma_qa_metric.id", "_ma_qa_metric.mode", "_ma_qa_metric.name",
-                        "_ma_qa_metric.software_group_id", "_ma_qa_metric.type", "1 global pLDDT 1 pLDDT", 
-                        "2 local  pLDDT 1 pLDDT", sep="\n", file=outfile)
-                    print("#", "loop_", "_ma_qa_metric_local.label_asym_id", "_ma_qa_metric_local.label_comp_id", 
-                        "_ma_qa_metric_local.label_seq_id", "_ma_qa_metric_local.metric_id", "_ma_qa_metric_local.metric_value",
-                        "_ma_qa_metric_local.model_id", "_ma_qa_metric_local.ordinal_id", sep="\n", file=outfile)
+                    print(
+                        "#",
+                        "loop_",
+                        "_ma_qa_metric.id",
+                        "_ma_qa_metric.mode",
+                        "_ma_qa_metric.name",
+                        "_ma_qa_metric.software_group_id",
+                        "_ma_qa_metric.type",
+                        "1 global pLDDT 1 pLDDT",
+                        "2 local  pLDDT 1 pLDDT",
+                        sep="\n",
+                        file=outfile,
+                    )
+                    print(
+                        "#",
+                        "loop_",
+                        "_ma_qa_metric_local.label_asym_id",
+                        "_ma_qa_metric_local.label_comp_id",
+                        "_ma_qa_metric_local.label_seq_id",
+                        "_ma_qa_metric_local.metric_id",
+                        "_ma_qa_metric_local.metric_value",
+                        "_ma_qa_metric_local.model_id",
+                        "_ma_qa_metric_local.ordinal_id",
+                        sep="\n",
+                        file=outfile,
+                    )
 
                     info_header = list()
                     for i in range(20):
@@ -275,17 +300,21 @@ def save_predictions_from_dataset(
                     previous_resid = None
 
                     for entry in atoms_cif:
-                        if previous_resid is None or previous_resid != int(entry[26:30]):
+                        if previous_resid is None or previous_resid != int(
+                            entry[26:30]
+                        ):
                             qa_metric = [" " for _ in range(24)]
                             auth_id = entry.split()[15]
-                            #qa_metric[20:20+len(auth_id)] = auth_id
+                            # qa_metric[20:20+len(auth_id)] = auth_id
                             qa_metric[-4:] = entry[26:30]
                             qa_metric[0] = entry[22]
                             qa_metric[2:5] = entry[18:21]
-                            qa_metric[6:6+len(auth_id)] = auth_id
-                            #qa_metric[6:10] = entry[26:30]
+                            qa_metric[6 : 6 + len(auth_id)] = auth_id
+                            # qa_metric[6:10] = entry[26:30]
                             qa_metric[10] = "2"
-                            qa_metric[12:17] = '{:.6f}'.format(float(entry.split()[14]))[:5]
+                            qa_metric[12:17] = "{:.6f}".format(
+                                float(entry.split()[14])
+                            )[:5]
                             qa_metric[18] = "1"
                             previous_resid = int(entry[26:30])
                             print("".join(qa_metric), file=outfile)
@@ -296,17 +325,15 @@ def save_predictions_from_dataset(
                         print(entry, file=outfile)
                     print("#", file=outfile)
 
-
-
             except Exception as E:
                 log.error(f"Unable to write prediction PDB: {E}")
 
     # Merge and calculate performance
     df_all = pd.concat(dfs_list, ignore_index=False)
 
-    y_true = df_all["residue"].apply(lambda x: str(x).isupper())
+    # y_true = df_all["residue"].apply(lambda x: str(x).isupper())
     y_hat = df_all["Discotope-3.0_score"]
-    #log.info(f"Merged, AUC {get_auc(y_true, y_hat):.5f}")
+    # log.info(f"Merged, AUC {get_auc(y_true, y_hat):.5f}")
 
     return df_all
 
@@ -326,6 +353,7 @@ def merge_prediction_csvs(csv_dir: str, outfile: str):
 
     log.info(f"Saving Discotope-3.0 merged CSV to {outfile}")
     df_dt3.to_csv(outfile, index=False)
+
 
 class Clean_Chain(Select):
     def __init__(self, score):
@@ -355,42 +383,44 @@ class Clean_Chain(Select):
         else:
             self.letter = atom.get_full_id()[3][2]
             if atom.get_full_id()[3][2] not in (self.prev_letter, " "):
-                log.info(f"A residue with lettered numbering was found ({atom.get_full_id()[3][1]}{atom.get_full_id()[3][2]}). This may mess up visualisation.")
+                log.info(
+                    f"A residue with lettered numbering was found ({atom.get_full_id()[3][1]}{atom.get_full_id()[3][2]}). This may mess up visualisation."
+                )
                 self.letter_correction += 1
             self.prev_letter = self.letter
-            
+
             res_id = atom.get_full_id()[3][1] + self.letter_correction
 
             if self.init_resid is None:
                 self.init_resid = res_id
-            
+
             if self.prev_resid is not None and res_id - self.prev_resid > 1:
                 self.init_resid += res_id - self.prev_resid - 1
-
-            #print(atom.get_full_id()[3], res_id, self.prev_resid, self.letter_correction, res_id - self.init_resid)
 
             self.prev_resid = res_id
 
             atom.set_bfactor(self.score[res_id - self.init_resid])
         return True
 
+
 def save_pdb_and_cif(pdb_name, pdb_path, out_prefix, score):
 
     p = PDBParser(PERMISSIVE=True)
     structure = p.get_structure(pdb_name, pdb_path)
 
-    chains = structure.get_chains()
+    # chains = structure.get_chains()
 
     pdb_out = f"{out_prefix}.pdb"
     cif_out = f"{out_prefix}.cif"
-    
+
     io_w_no_h = PDBIO()
     io_w_no_h.set_structure(structure)
     io_w_no_h.save(pdb_out, Clean_Chain(score))
-    
-    io=MMCIFIO()
+
+    io = MMCIFIO()
     io.set_structure(structure)
     io.save(cif_out, Clean_Chain(score))
+
 
 def fetch_and_process_from_list_file(list_file, out_dir, tmp_dir):
     """Fetch and process PDB chains/UniProt entries from list input"""
@@ -399,28 +429,13 @@ def fetch_and_process_from_list_file(list_file, out_dir, tmp_dir):
         pdb_list = sorted(set([line.strip() for line in f.readlines()]))
 
     if len(pdb_list) == 0:
-        print("No IDs found in list.")
         log.error("No IDs found in list.")
         sys.exit(0)
     elif len(pdb_list) > MAX_FILES:
-        print(f"A maximum of {MAX_FILES} PDB IDs can be processed at one time ({len(pdb_list)} IDs found).")
-        log.error(f"A maximum of {MAX_FILES} PDB IDs can be processed at one time ({len(pdb_list)} IDs found).")
+        log.error(
+            f"A maximum of {MAX_FILES} PDB IDs can be processed at one time ({len(pdb_list)} IDs found)."
+        )
         sys.exit(0)
-
-    """with open(list_file, "r") as f:
-        for entry in f:
-            entry = entry.strip()
-            if not len(entry):
-                continue
-            entry_split = entry.split("_")
-            if len(entry_split) == 2:
-                pdb_chains.append([entry_split[0], entry_split[1], 1])
-            elif len(entry_split) == 1:
-                pdb_chains.append([entry, "A", None])
-            else:
-                print(f'Entry ({entry}) in list could not be used as an identifier.')
-                sys.exit(0)
-    """
 
     for prot_id in pdb_list:
         if args.id_type == "uniprot":
@@ -430,7 +445,6 @@ def fetch_and_process_from_list_file(list_file, out_dir, tmp_dir):
             URL = f"https://files.rcsb.org/download/{prot_id}.pdb"
             score = 100
         else:
-            print(f"Structure ID was of unknown type {args.id_type}")
             log.error(f"Structure ID was of unknown type {args.id_type}")
             sys.exit(0)
 
@@ -439,85 +453,85 @@ def fetch_and_process_from_list_file(list_file, out_dir, tmp_dir):
             with open(f"{tmp_dir}/temp.pdb", "wb") as f:
                 f.write(response.content)
         elif response.status_code == 404:
-            print(f"File with the given ID could not be found (url: {URL}).")
-            print("Maybe you selected the wrong ID type or misspelled the ID.")
             log.error(f"File with the given ID could not be found (url: {URL}).")
             log.error("Maybe you selected the wrong ID type or misspelled the ID.")
             sys.exit(0)
         elif response.status_code in (408, 504):
-            print(f"Request timed out with error code {response.status_code} (url: {URL}).")
-            print("Try to download the structure(s) locally from the given database and upload as pdb or zip.")
-            log.error(f"Request timed out with error code {response.status_code} (url: {URL}).")
-            log.error("Try to download the structure(s) locally from the given database and upload as pdb or zip.")
+            log.error(
+                f"Request timed out with error code {response.status_code} (url: {URL})."
+            )
+            log.error(
+                "Try to download the structure(s) locally from the given database and upload as pdb or zip."
+            )
             sys.exit(0)
         else:
-            print(f"Received status code {response.status_code}, when trying to fetch file from {URL}")
-            log.error(f"Received status code {response.status_code}, when trying to fetch file from {URL}")
+            log.error(
+                f"Received status code {response.status_code}, when trying to fetch file from {URL}"
+            )
             sys.exit(0)
 
-        save_pdb_and_cif(f"{prot_id}", f"{tmp_dir}/temp.pdb", 
-            f"{out_dir}/{prot_id}", score)
-        
+        save_pdb_and_cif(
+            f"{prot_id}", f"{tmp_dir}/temp.pdb", f"{out_dir}/{prot_id}", score
+        )
 
 
 def main(args):
     """Main function"""
 
-    if not (args.f or args.list):
-        print(f"No input given.")
-        log.error(f"No input given.")
+    if not (args.pdb_or_zip_file or args.list_file):
+        log.error(f"No input PDB or list file given")
         sys.exit(0)
 
     # Make sure out_dir exists
-    if args.f:
+    if args.pdb_or_zip_file:
         zip_file = False
-        with open(args.f, "rb") as fb:
+        with open(args.pdb_or_zip_file, "rb") as fb:
             header_bits = fb.read(4)
             if header_bits == b"PK\x03\x04":
                 zip_file = True
-        
+
         if zip_file:
-            log.info("")
-            os.system(f"unzip {args.f} -d {args.pdb_dir} > /dev/null 2>&1")
+            log.info(f"Reading ZIP file: {os.path.basename(args.pdb_or_zip_file)}")
+            os.system(f"unzip {args.pdb_or_zip_file} -d {args.pdb_dir} > /dev/null 2>&1")
+
             pdb_files_from_zip = glob.glob(f"{args.pdb_dir}/*.pdb")
             if len(pdb_files_from_zip) == 0:
-                print("No .pdb files found in zip file.")
-                print("Make sure they have the .pdb prefix and are not contained in folders or subfolder.")
-                log.error("No .pdb files found in zip file.")
-                log.error("Make sure they have the .pdb prefix and are not contained in folders or subfolder.")
+                log.error("No .pdb files found in zip file. Ensure files end in .pdb, and are not contained in folders/subfolder.")
                 sys.exit(0)
             elif len(pdb_files_from_zip) > MAX_FILES:
-                print(f"A maximum of {MAX_FILES} PDB files can be processed at one time ({len(pdb_files_from_zip)} files found).")
-                log.error(f"A maximum of {MAX_FILES} PDB files can be processed at one time ({len(pdb_files_from_zip)} files found).")
+                log.error(
+                    f"A maximum of {MAX_FILES} PDB files can be processed at one time ({len(pdb_files_from_zip)} files found)."
+                )
                 sys.exit(0)
+
             for pdb_file in pdb_files_from_zip:
                 pdb_prefix = pdb_file.rsplit(".", 1)[0]
                 pdb_name = pdb_prefix.rsplit("/", 1)[-1]
                 if args.struc_type == "solved":
-                    save_pdb_and_cif(pdb_name, pdb_file, 
-                        pdb_prefix, None)
-                elif args.struc_type == "alphafold": 
-                    save_pdb_and_cif(pdb_name, pdb_file, 
-                        pdb_prefix, 100)
+                    save_pdb_and_cif(pdb_name, pdb_file, pdb_prefix, None)
+                elif args.struc_type == "alphafold":
+                    save_pdb_and_cif(pdb_name, pdb_file, pdb_prefix, 100)
                 else:
-                    print(f"Structure type was of unexpected type {args.struc_type}.")
-                    log.error(f"Structure type was of unexpected type {args.struc_type}.")
+                    log.error(
+                        f"Structure type was of unexpected type {args.struc_type}."
+                    )
                     sys.exit(0)
                 os.remove(pdb_file)
         else:
             if args.struc_type == "solved":
-                save_pdb_and_cif(f"Custom upload", args.f, 
-                    f"{args.pdb_dir}/upload", None)
-            elif args.struc_type == "alphafold": 
-                save_pdb_and_cif(f"Custom upload", args.f, 
-                    f"{args.pdb_dir}/upload", 100)
+                save_pdb_and_cif(
+                    f"Custom upload", args.pdb_or_zip_file, f"{args.pdb_dir}/upload", None
+                )
+            elif args.struc_type == "alphafold":
+                save_pdb_and_cif(
+                    f"Custom upload", args.pdb_or_zip_file, f"{args.pdb_dir}/upload", 100
+                )
             else:
-                print(f"Structure type was of unexpected type {args.struc_type}.")
                 log.error(f"Structure type was of unexpected type {args.struc_type}.")
                 sys.exit(0)
 
-    if args.list:
-        fetch_and_process_from_list_file(args.list, args.pdb_dir, args.out_dir)
+    if args.list_file:
+        fetch_and_process_from_list_file(args.list_file, args.pdb_dir, args.out_dir)
 
     log.info(f"Creating FASTA file from PDB sequences: {args.out_dir}/pdbs.fasta")
     save_fasta_from_pdbs(args.pdb_dir, args.out_dir)
@@ -547,8 +561,7 @@ def main(args):
     )
 
     if len(dataset) == 0:
-        #TODO: Specify what happened
-        print("No valid file was supplied.")
+        # TODO: Specify what happened
         log.error("No valid file was supplied.")
         sys.exit(0)
 
@@ -567,14 +580,18 @@ def main(args):
     temp_id = "/".join(args.out_dir.rsplit("/", 2)[1:])
 
     os.system(f"cd {args.out_dir} && zip archive *epi.pdb *.csv > /dev/null 2>&1")
-    print(f'<a href="/services/DiscoTope-3.0/tmp/{temp_id}/archive.zip"><p>Download DiscoTope-3.0 prediction results as zip</p></a>')
+    print(
+        f'<a href="/services/DiscoTope-3.0/tmp/{temp_id}/archive.zip"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
+    )
 
-    print("""<div class="wrap-collabsible"> 
-        <input id="collapsible" class="toggle" type="checkbox"> 
+    print(
+        """<div class="wrap-collabsible">
+        <input id="collapsible" class="toggle" type="checkbox">
         <label for="collapsible" class="lbl-toggle">Individual result downloads</label>
         <div class="collapsible-content">
         <div class="content-inner">
-        """)
+        """
+    )
 
     pdb_chains_dict = dict()
     for pdb_w_chain_id in fasta_dict.keys():
@@ -585,25 +602,48 @@ def main(args):
         outpdb = f"{temp_id}/{sample['pdb_id']}_raw.pdb"
         outcsv = f"{temp_id}/{sample['pdb_id']}.csv"
         outcif = f"{temp_id}/{sample['pdb_id']}_raw.cif"
-        
+
         examples += "{"
         examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/services/DiscoTope-3.0/tmp/{outcif}',info:'Structure {i+1}'"
         examples += "},"
 
-        style = 'style=\"margin-top:2em;\"' if i>0 else ''
-        print(f"<h3 {style}>{sample['pdb_id']} (chains {'/'.join(pdb_chains_dict[sample['pdb_id']])})</h3>")
-        print(f'<a href="/services/DiscoTope-3.0/tmp/{outpdb}"><p>Download PDB w/ DiscoTope-3.0 prediction scores</p></a>')
+        style = 'style="margin-top:2em;"' if i > 0 else ""
+        print(
+            f"<h3 {style}>{sample['pdb_id']} (chains {'/'.join(pdb_chains_dict[sample['pdb_id']])})</h3>"
+        )
+        print(
+            f'<a href="/services/DiscoTope-3.0/tmp/{outpdb}"><p>Download PDB w/ DiscoTope-3.0 prediction scores</p></a>'
+        )
         print(f'<a href="/services/DiscoTope-3.0/tmp/{outcsv}"><p>Download CSV</p></a>')
-    
+
     print("</div></div></div>")
     examples += "];</script>"
     print(examples)
 
+def check_valid_input(args):
+    """ Checks for valid arguments """
+
+    size_mb = os.stat(args.in_file) / (1024 * 1024)
+    print(size_mb)
+
+    asd
+
+
 if __name__ == "__main__":
-    #print("<h3>Debugging output</h3>")
+    # print("<h3>Debugging output</h3>")
 
     args = cmdline_args()
-    logging.basicConfig(filename=f'{args.out_dir}/dt3.log', encoding='utf-8', level=logging.INFO, format="[{asctime}] {message}", style="{")
+    logging.basicConfig(
+        filename=f"{args.out_dir}/dt3.log",
+        encoding="utf-8",
+        level=logging.INFO,
+        format="[{asctime}] {message}",
+        style="{",
+    )
     log = logging.getLogger(__name__)
     log.info("Predicting PDBs using Discotope-3.0")
+
+    os.makedirs(args.out_dir, exist_ok=True)
+    os.makedirs(args.pdb_dir, exist_ok=True)
+
     main(args)

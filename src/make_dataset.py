@@ -213,7 +213,7 @@ def save_fasta_from_pdbs(pdb_dir: str, out_dir: str):
         """Reads sequence from PDB, based on carbon-alpha atoms"""
 
         structure = prody.parsePDB(pdb_path, subset="ca")
-        
+
         for chain in np.unique(structure.getChids()):
             seq = structure[chain].getSequence()
             yield chain, seq
@@ -225,7 +225,7 @@ def save_fasta_from_pdbs(pdb_dir: str, out_dir: str):
         pdb = os.path.splitext(os.path.basename(pdb_path))[0]
 
         for chain, seq in prody_read_seq(str(pdb_path)):
-            id = f'{pdb}_{chain}'
+            id = f"{pdb}_{chain}"
 
             fasta_dict[id] = SeqIO.SeqRecord(
                 Bio.Seq.Seq(seq), id=id, name=id, description=id
@@ -291,10 +291,10 @@ def embed_pdbs_IF1(
             # MH: Better system for choosing chains needed
             # Extract chain from last character after "_"
             # chain_id = "A"
-            #chain_id = pdb.split("_")[1][0]
+            # chain_id = pdb.split("_")[1][0]
 
-            #if struc_type != "solved":
-                #chain_id = None
+            # if struc_type != "solved":
+            # chain_id = None
             chain_id = None
 
             # Extract representation
@@ -609,7 +609,7 @@ class Discotope_Dataset(torch.utils.data.Dataset):
         # Get PDB filepath from PDB id and PDB directory
         pdb_fp = f"{self.PDB_path}/{self.id_basename_dict[pdb_id]}.pdb"
         seq_str = prody.parsePDB(pdb_fp, subset="ca").getSequence()
-        #seq_str = str(self.fasta_dict[pdb_id].seq)
+        # seq_str = str(self.fasta_dict[pdb_id].seq)
 
         if self.verbose:
             log.info(

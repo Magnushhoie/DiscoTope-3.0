@@ -8,13 +8,13 @@ from typing import List, Sequence, Tuple
 import biotite.structure
 import numpy as np
 import torch
-
 import torch.nn.functional as F
 from biotite.sequence import ProteinSequence
 from biotite.structure import filter_backbone, get_chains
 from biotite.structure.io import pdb, pdbx
 from biotite.structure.residues import get_residues
 from esm.data import BatchConverter
+
 
 def load_structure(fpath, chain=None):
     """
