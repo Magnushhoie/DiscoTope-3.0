@@ -122,13 +122,11 @@ def score_sequence(model, alphabet, coords, seq):
     return ll_fullseq, ll_withcoord
 
 
-def get_encoder_output(model, alphabet, coords, confidence, seq, device="cpu"):
-
+def get_encoder_output(model, alphabet, coords, seq, device="cpu"):
     # Batch-converter already checks for CUDA #MH
-    batch_converter = CoordBatchConverter(alphabet)
-
     # the batch_converter is essential for forming the correct input format
-    batch = [(coords, confidence, seq)]
+    batch_converter = CoordBatchConverter(alphabet)
+    batch = [(coords, None, seq)]
     coords, confidence, _, _, padding_mask = batch_converter(batch, device=device)
 
     # Manually send model to cuda device if possible #MH

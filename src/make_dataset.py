@@ -5,10 +5,10 @@ logging.basicConfig(level=logging.INFO, format="[{asctime}] {message}", style="{
 log = logging.getLogger(__name__)
 
 import os
-import re
 import sys
 # Set project path two levels up
 from pathlib import Path
+from typing import List
 
 import Bio
 import biotite.structure
@@ -119,6 +119,47 @@ def cmdline_args():
     )
 
     return p.parse_args()
+
+
+def load_IF1_tensors(
+    pdb_files: List,
+    verbose: int = 1,
+) -> List:
+    """Embeds PDBs using IF1, returns list"""
+
+    import esm
+    import esm.inverse_folding
+
+    # Load ESM inverse folding model
+    model, alphabet = esm.pretrained.esm_if1_gvp4_t16_142M_UR50()
+    model = model.eval()
+
+    # Check device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    list_IF1_tensors = []
+    list_sequences = []
+    for i, pdb_path in enumerate(pdb_files):
+        log.info(f"{i+1} / {len(pdb_files)}: Embedding {pdb_path})")
+        print(f"{i+1} / {len(pdb_files)}: Embedding {pdb_path})")
+        # chain_id = pdbf.split("_")[1][0]
+        structure = esm.inverse_folding.util.load_structure(str(pdb_path), chain=None)
+        coords, seq = esm.inverse_folding.util.extract_coords_from_structure(structure)
+        rep = (
+            src.esm_util_custom.get_encoder_output(model, alphabet, coords, seq, device=device)
+            .detach()
+            .cpu()
+        )
+
+        list_IF1_tensors.append(rep)
+        list_sequences.append(seq)
+
+    return list_IF1_tensors, list_sequences
+
+
+def get_basename_no_ext(filepath):
+    """Returns file basename excluding extension, e.g. dir/5kja_A.pdb -> 5kja_A"""
+    return os.path.splitext(os.path.basename(filepath))[0]
 
 
 def load_structure_discotope(fpath, chain=None):
@@ -429,7 +470,7 @@ def pdb_extract_seq_residx_bfac_rsas_diam(pdb_path, chain_id):
     return seq, res_idxs, bfacs, rsa, diam, gyr_rad
 
 
-class Discotope_Dataset(torch.utils.data.Dataset):
+class Discotope_Dataset_web(torch.utils.data.Dataset):
     """
     Creates pre-processed torch Dataset from input FASTA dict and directories with PDBs and IF-1 tensors
     Note: FASTA IDs, PDB filenames and ESM-IF1 tensor names must be shared!
@@ -443,15 +484,12 @@ class Discotope_Dataset(torch.utils.data.Dataset):
     - 534:535 = Residue RSA, extracted using DSSP on Alphafold2 model (1)
 
     Args:
-        fasta_dict: Dictionary from SeqIO.to_dict(SeqIO.parse(input_fasta, "fasta"))
         pdb_dir: Directory with PDBs, shared IDs are FASTA IDs
-        IF1_dir: Directory with ESM-IF1 tensors (see Read More)
         preprocess: Set to True to pre-process samples (True)
         n_jobs: Parallelize pre-processing across n cores (1)
 
     Example usage:
-    fasta_dict = SeqIO.to_dict(SeqIO.parse(input_fasta, "fasta"))
-    dataset = Discotope_Dataset(fasta_dict, pdb_dir, IF1_dir)
+    dataset = Discotope_Dataset(pdb_dir)
 
     # Extract one sample (antigen)
     sample = dataset[0]
@@ -468,105 +506,41 @@ class Discotope_Dataset(torch.utils.data.Dataset):
 
     def __init__(
         self,
-        fasta_dict: "dict[str, Bio.SeqIO.SeqRecord]",
         pdb_dir: str,
-        IF1_dir: str,
+        structure_type: int,  # alphafold or solved
         preprocess: bool = True,
         n_jobs: int = 1,
         verbose: int = 0,
     ) -> torch.utils.data.Dataset:
 
         self.verbose = verbose
-
-        # Input FASTA
-        self.fasta_dict = fasta_dict
-
-        # Directory with AlphaFold2 PDBs
-        self.PDB_path = Path(pdb_dir)
-
-        # Directory with pre-processed ESM-IF1 embeddings
-        self.IF1_path = Path(IF1_dir)
-
-        # Convert FASTA IDs to sorted list
-        self.key_list = sorted(fasta_dict.keys())
-
-        # Parallell jobs to run while preprocessing (don't use)
         self.n_jobs = n_jobs
-
-        # preprocess
         self.preprocess = preprocess
 
-        # Dictionary mapping FASTA/PDB IDs to basenames for retrieving .pdb and .pt files
-        self.id_basename_dict = self.create_id_with_basename_dict(self.PDB_path)
+        # Get PDB path dict
+        self.list_pdb_files = glob.glob(f"{pdb_dir}/*.pdb")
+        if len(self.list_pdb_files) == 0:
+            log.error(f"No files found in {pdb_dir}")
+            sys.exit(0)
 
-        self.key_list = list(self.id_basename_dict.keys())
-
-        # Check that all FASTA IDs are found among PDB IDs
-        missing_ids = set(self.key_list) - set(self.id_basename_dict.keys())
-        if len(missing_ids) >= 1:
-            log.error(
-                f"Unable to find all FASTA IDs in pdb_dir {pdb_dir}:\n{missing_ids}"
-            )
-            sys.exit()
+        log.info(f"Read {len(self.list_pdb_files)} PDBs from {pdb_dir}")
 
         if self.preprocess:
-            results = self.process_samples_parallel(n_jobs=self.n_jobs)
 
-            # Exclude results if not expected returned dict
-            missing = [r for r in results if type(r) != dict]
-            results = [r for r in results if type(r) == dict]
+            # Read in IF1 tensors
+            self.list_IF1_tensors, self.list_sequences = load_IF1_tensors(
+                self.list_pdb_files
+            )
 
-            if len(missing) >= 1:
-                print(f"Unable to process {len(missing)} PDBs:\n{missing}\n")
+            # Remaining pre-processing
+            self.preprocessed_dataset = self.process_samples_parallel(
+                n_jobs=self.n_jobs
+            )
 
-            self.preprocessed_dataset = results
         else:
             self.preprocessed_dataset = []
             log.error(f"Must pre-process Discotope_Dataset with")
             sys.exit()
-
-    def create_id_with_basename_dict(
-        self,
-        pdb_dir: str,
-        verbose: int = 0,
-    ) -> "dict[str : str]":
-        r"""
-        Create dict to match PDB ID with PDB filename, for later extracting id.pdb and id.pt files from FASTA IDs
-
-        Our assumption of matching FASTA ID with PDB filename breaks for AlphaFold2 generated PDBs
-        both IDs 6vtw_A and 6vtw_A_unrelaxed_rank_1_model_5 should match
-        ../webserver/debug_pdbs/6vtw_A_unrelaxed_rank_1_model_5.pdb
-
-        Returns:
-            id_dict: dict matching PDB's ID with its basename, removing AlphaFold pattern r'_unrelaxed_rank_\d+_model_\d+'
-        """
-
-        # Find all PDB files in pdb_dir
-        pdb_fullpaths = glob.glob(f"{pdb_dir}/*.pdb")
-
-        id_dict = {}
-        for pdb_path in pdb_fullpaths:
-
-            # Extract PDB basename without file extension
-            pdb_basename = os.path.splitext(os.path.basename(pdb_path))[0]
-
-            # If AlphaFold2 pattern found, remove it from the ID
-            id = re.sub(r"_unrelaxed_rank_\d+_model_\d+", "", pdb_basename)
-            id = re.sub(r"_rank_\d+_model_\d+.*unrelaxed$", "", id)
-
-            if id != pdb_basename and verbose:
-                print(f"Removing AlphaFold2 pattern: {pdb_basename} -> {id}")
-
-            # Match ID shortname and full basename
-            id_dict[id] = pdb_basename
-            id_dict[pdb_basename] = pdb_basename
-
-        return id_dict
-
-    def find_epitopes(self, seq: str):
-        """Returns torch Tensor with 1 where residue is uppercase, 0 where residue is lowercase"""
-        # return torch.Tensor([1 if res.isupper() else 0 for res in seq]).to(torch.int64)
-        return np.array([1 if res.isupper() else 0 for res in seq])
 
     def one_hot_encode(self, seq: str):
         """One-hot encodes amino-acids to 20 dims"""
@@ -599,31 +573,22 @@ class Discotope_Dataset(torch.utils.data.Dataset):
     def process_sample(self, idx):
         """Process individual pdb, fasta sequence, ESM"""
 
-        log.info(f"Processing sample {idx+1} of {len(self.fasta_dict)}")
-
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        pdb_id = self.key_list[idx]
-
         # Get PDB filepath from PDB id and PDB directory
-        pdb_fp = f"{self.PDB_path}/{self.id_basename_dict[pdb_id]}.pdb"
-        seq_str = prody.parsePDB(pdb_fp, subset="ca").getSequence()
-        # seq_str = str(self.fasta_dict[pdb_id].seq)
+        pdb_fp = self.list_pdb_files[idx]
+        pdb_id = get_basename_no_ext(pdb_fp)
+        log.info(f"Processing {idx+1} / {len(self.list_pdb_files)}: PDB {pdb_id}")
 
-        if self.verbose:
-            log.info(
-                f"PDB id {pdb_id}, FASTA {len(seq_str)} residues, PDB path {pdb_fp}"
-            )
+        # Read variables
+        IF1_tensor = self.list_IF1_tensors[idx]
+        seq = self.list_sequences[idx]
+        seq_onehot = self.one_hot_encode(seq)
+        L = len(seq)
 
         try:
-
-            # Add sequence from FASTA
-            seq_onehot = torch.from_numpy(self.one_hot_encode(seq_str))
-
-            # Get antigen length
-            L = len(seq_str)
-            lengths = torch.tensor([L] * L)
+            lengths = np.array([L] * L)
 
             # Extract values from PDB
             (
@@ -635,14 +600,25 @@ class Discotope_Dataset(torch.utils.data.Dataset):
                 pdb_gyrrad,
             ) = pdb_extract_seq_residx_bfac_rsas_diam(pdb_fp, chain_id=None)
 
-            if pdb_seq.upper() != seq_str.upper():
-                log.error(f"Mismatch between PDB sequence and FASTA sequence")
-                print(pdb_seq.upper())
-                print(seq_str.upper())
-                raise Exception
+            # Struc_type 1 and pLDDTs set to B-factors only if AlphaFold structure
+            if self.structure_type == "alphafold":
+                struc_type = 1
+            else:
+                struc_type = 0
+                pdb_bfacs = np.full(len(IF1_tensor), 100)
 
-            # Load inverse folding tensor
-            IF_tensor = self.load_IF_tensor(pdb_id)
+            # Feature tensor for training/prediction
+            X_arr = np.concatenate(
+                [
+                    IF1_tensor.detach().numpy(),  # L x 512
+                    seq_onehot,  # L x 20
+                    pdb_bfacs.reshape(-1, 1),  # L x 1
+                    lengths.reshape(-1, 1),  # L x 1
+                    np.array([struc_type] * L).reshape(-1, 1),  # L x 1
+                    pdb_rsas.reshape(-1, 1),  # L x 1
+                ],
+                axis=1,
+            )
 
             # Dictionary with feature mappings
             feature_idxs = {
@@ -654,48 +630,12 @@ class Discotope_Dataset(torch.utils.data.Dataset):
                 "RSAs": range(535, 536),
             }
 
-            # Infer structure type by B-factor column
-            if (pdb_bfacs == 100).sum() == len(pdb_bfacs):
-                # Solved if B-factor is all 100, forcibly set all residues to 100 at actual length
-                struc_type = 0
-                pdb_bfacs = np.full(len(IF_tensor), 100)
-
-                if self.verbose:
-                    log.info(f"Solved structure inferred")
-            else:
-                # AF2 Predicted if B-factor is not all 1
-                struc_type = 1
-
-                if self.verbose:
-                    log.info(f"AF2 structure inferred")
-
-            # log.info("No features")
-
-            # Feature tensor for training/prediction
-            X_arr = np.concatenate(
-                [
-                    IF_tensor.detach().numpy(),  # L x 512
-                    seq_onehot,  # L x 20
-                    pdb_bfacs.reshape(-1, 1),  # L x 1
-                    lengths.reshape(-1, 1),  # L x 1
-                    np.array([struc_type] * L).reshape(-1, 1),  # L x 1
-                    pdb_rsas.reshape(-1, 1),  # L x 1
-                ],
-                axis=1,
-            )
-
-            # Target tensor for training, find epitopes from upper-case letters in sequence
-            # NB: Ignore if residues are extracted from PDB sequence (returns all uppercase)
-            y_arr = self.find_epitopes(seq_str)
-
-            # import pdb; pdb.set_trace()
-
             # DataFrame for easy overview
             df_stats = pd.DataFrame(
                 {
                     "pdb": pdb_id,
                     "idx": list(range(1, L + 1)),
-                    "residue": list(seq_str),
+                    "residue": list(seq),
                     "res_idx": pdb_res_idxs,
                     "rsa": pdb_rsas.flatten(),
                     "diam": pdb_diam,
@@ -710,12 +650,11 @@ class Discotope_Dataset(torch.utils.data.Dataset):
                 "pdb_id": pdb_id,
                 "pdb_fp": pdb_fp,
                 "X_arr": X_arr,
-                "y_arr": y_arr,
                 "df_stats": df_stats,
                 "length": L,
                 "pLDDTs": pdb_bfacs,
                 "RSAs": pdb_rsas,
-                "sequence_str": seq_str,
+                "sequence_str": seq,
                 "pdb_seq": pdb_seq,
                 "feature_idxs": feature_idxs,
                 "struc_type": struc_type,
@@ -724,7 +663,7 @@ class Discotope_Dataset(torch.utils.data.Dataset):
             return output_dict
 
         except Exception as E:
-            log.error(f"PDB id {pdb_id}, length {len(seq_str)} from {pdb_fp}:\n{E}")
+            log.error(f"Error: PDB id {pdb_id}, length {len(seq)} from {pdb_fp}: {E}")
             import traceback
 
             traceback.print_exc()
@@ -783,7 +722,7 @@ def main(args):
         )
 
     log.info(f"Pre-processing PDBs")
-    dataset = Discotope_Dataset(
+    dataset = Discotope_Dataset_web(
         fasta_dict, args.pdb_dir, IF1_dir=args.pdb_dir, verbose=args.verbose
     )
     log.info(

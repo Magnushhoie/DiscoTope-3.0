@@ -2,20 +2,24 @@
 # https://github.com/Magnushhoie/discotope3/
 
 MAX_FILES = 50
+MAX_FILE_SIZE_MB = 30
 
-import glob
+# import glob
 import logging
 import os
 import sys
+import tempfile
+from contextlib import closing
 # Set project path two levels up
 from pathlib import Path
 from typing import List
+from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
 import prody  # MH can rewrite with Biotite?
 import xgboost as xgb
-from Bio import SeqIO
+# from Bio import SeqIO
 from sklearn import metrics
 
 ROOT_PATH = str(os.path.dirname(os.getcwd()))
@@ -28,8 +32,7 @@ from Bio.PDB.mmcifio import MMCIFIO
 from Bio.PDB.PDBParser import PDBParser
 
 # Import make_dataset scripts
-from make_dataset import (Discotope_Dataset, embed_pdbs_IF1,
-                          save_fasta_from_pdbs)
+from make_dataset import Discotope_Dataset_web
 
 
 def cmdline_args():
@@ -80,14 +83,14 @@ def cmdline_args():
 
     p.add_argument(
         "--id_type",
-        help="ID type (rcsb or uniprot)",
+        help="PDB ID type (rcsb or uniprot)",
     )
 
     p.add_argument(
         "--pdb_dir",
         default="data/pdbs",
         help="Directory with AF2 PDBs",
-        #type=lambda x: is_valid_path(p, x),
+        # type=lambda x: is_valid_path(p, x),
     )
 
     p.add_argument(
@@ -196,7 +199,7 @@ def get_auc(y_true, y_pred, sig_dig=5):
 
 
 def save_predictions_from_dataset(
-    dataset: Discotope_Dataset,
+    dataset: Discotope_Dataset_web,
     models: List["xgb.XGBClassifier"],
     out_dir: str,
     calculate_struc_propensity_flag: bool = False,
@@ -403,7 +406,7 @@ class Clean_Chain(Select):
         return True
 
 
-def save_pdb_and_cif(pdb_name, pdb_path, out_prefix, score):
+def save_pdb(pdb_name, pdb_path, out_prefix, score):
 
     p = PDBParser(PERMISSIVE=True)
     structure = p.get_structure(pdb_name, pdb_path)
@@ -411,18 +414,17 @@ def save_pdb_and_cif(pdb_name, pdb_path, out_prefix, score):
     # chains = structure.get_chains()
 
     pdb_out = f"{out_prefix}.pdb"
-    cif_out = f"{out_prefix}.cif"
-
     io_w_no_h = PDBIO()
     io_w_no_h.set_structure(structure)
     io_w_no_h.save(pdb_out, Clean_Chain(score))
 
-    io = MMCIFIO()
-    io.set_structure(structure)
-    io.save(cif_out, Clean_Chain(score))
+    # cif_out = f"{out_prefix}.cif"
+    # io = MMCIFIO()
+    # io.set_structure(structure)
+    # io.save(cif_out, Clean_Chain(score))
 
 
-def fetch_and_process_from_list_file(list_file, out_dir, tmp_dir):
+def fetch_and_process_from_list_file(list_file, out_dir):
     """Fetch and process PDB chains/UniProt entries from list input"""
 
     with open(list_file, "r") as f:
@@ -450,7 +452,7 @@ def fetch_and_process_from_list_file(list_file, out_dir, tmp_dir):
 
         response = requests.get(URL)
         if response.status_code == 200:
-            with open(f"{tmp_dir}/temp.pdb", "wb") as f:
+            with open(f"{out_dir}/temp", "wb") as f:
                 f.write(response.content)
         elif response.status_code == 404:
             log.error(f"File with the given ID could not be found (url: {URL}).")
@@ -470,163 +472,149 @@ def fetch_and_process_from_list_file(list_file, out_dir, tmp_dir):
             )
             sys.exit(0)
 
-        save_pdb_and_cif(
-            f"{prot_id}", f"{tmp_dir}/temp.pdb", f"{out_dir}/{prot_id}", score
+        save_pdb(f"{prot_id}", f"{out_dir}/temp", f"{out_dir}/{prot_id}", score)
+
+
+def true_if_zip(infile):
+    """Returns True if file header bits are zip file"""
+    with open(infile, "rb") as fb:
+        header_bits = fb.read(4)
+    return header_bits == b"PK\x03\x04"
+
+
+def check_valid_input(args):
+    """Checks for valid arguments"""
+
+    # Check input arguments
+    if not (args.pdb_or_zip_file or args.list_file):
+        log.error(f"No input PDB or list file given")
+        sys.exit(0)
+
+    if args.list_file and not args.id_type:
+        log.error(f"Must provide id_type (rcsb or uniprot) with list_file")
+
+    if args.struc_type not in ["solved", "alphafold"]:
+        log.error(
+            f"--struc_type flag invalid, must be solved or alphafold. Found {args.struc_type}"
         )
+        sys.exit(0)
+
+    # Check file-size
+    size_mb = os.stat(args.pdb_or_zip_file).st_size / (1024 * 1024)
+    if size_mb > MAX_FILES:
+        log.error(f"Max file-size {MAX_FILE_SIZE_MB} MB, found {round(size_mb)} MB")
+        sys.exit(0)
+
+    if true_if_zip(args.pdb_or_zip_file):
+        with closing(ZipFile(args.pdb_or_zip_file)) as archive:
+            file_count = len(archive.infolist())
+            file_names = archive.namelist()
+
+        # Check number of files in zip
+        if file_count > MAX_FILES:
+            log.error(f"Max number of files {file_count}, found {file_count}")
+            sys.exit(0)
+
+        # Check filenames end in .pdb
+        name = file_names[0]
+        if os.path.splitext(name)[-1] != ".pdb":
+            log.error(f"Ensure all ZIP content file-names end in .pdb, found {name}")
+            sys.exit(0)
 
 
 def main(args):
     """Main function"""
 
-    if not (args.pdb_or_zip_file or args.list_file):
-        log.error(f"No input PDB or list file given")
-        sys.exit(0)
+    # Error messages if invalid input
+    check_valid_input(args)
 
-    # Make sure out_dir exists
-    if args.pdb_or_zip_file:
-        zip_file = False
-        with open(args.pdb_or_zip_file, "rb") as fb:
-            header_bits = fb.read(4)
-            if header_bits == b"PK\x03\x04":
-                zip_file = True
+    # Create temporary directory
+    with tempfile.TemporaryDirectory() as tempdir:
 
-        if zip_file:
-            log.info(f"Reading ZIP file: {os.path.basename(args.pdb_or_zip_file)}")
-            os.system(f"unzip {args.pdb_or_zip_file} -d {args.pdb_dir} > /dev/null 2>&1")
+        if args.list_file:
+            log.info(f"Fetching PDBs")
+            fetch_and_process_from_list_file(args.list_file, tempdir, tempdir)
 
-            pdb_files_from_zip = glob.glob(f"{args.pdb_dir}/*.pdb")
-            if len(pdb_files_from_zip) == 0:
-                log.error("No .pdb files found in zip file. Ensure files end in .pdb, and are not contained in folders/subfolder.")
-                sys.exit(0)
-            elif len(pdb_files_from_zip) > MAX_FILES:
-                log.error(
-                    f"A maximum of {MAX_FILES} PDB files can be processed at one time ({len(pdb_files_from_zip)} files found)."
-                )
-                sys.exit(0)
+        # Unzip if ZIP
+        if true_if_zip(args.pdb_or_zip_file):
+            log.info(f"Unzipping PDBs")
+            zf = ZipFile(args.pdb_or_zip_file)
+            zf.extractall(tempdir)
 
-            for pdb_file in pdb_files_from_zip:
-                pdb_prefix = pdb_file.rsplit(".", 1)[0]
-                pdb_name = pdb_prefix.rsplit("/", 1)[-1]
-                if args.struc_type == "solved":
-                    save_pdb_and_cif(pdb_name, pdb_file, pdb_prefix, None)
-                elif args.struc_type == "alphafold":
-                    save_pdb_and_cif(pdb_name, pdb_file, pdb_prefix, 100)
-                else:
-                    log.error(
-                        f"Structure type was of unexpected type {args.struc_type}."
-                    )
-                    sys.exit(0)
-                os.remove(pdb_file)
+        # Else single PDB
         else:
-            if args.struc_type == "solved":
-                save_pdb_and_cif(
-                    f"Custom upload", args.pdb_or_zip_file, f"{args.pdb_dir}/upload", None
-                )
-            elif args.struc_type == "alphafold":
-                save_pdb_and_cif(
-                    f"Custom upload", args.pdb_or_zip_file, f"{args.pdb_dir}/upload", 100
-                )
-            else:
-                log.error(f"Structure type was of unexpected type {args.struc_type}.")
-                sys.exit(0)
+            print("Not implemented")
+            sys.exit(0)
+            pass
 
-    if args.list_file:
-        fetch_and_process_from_list_file(args.list_file, args.pdb_dir, args.out_dir)
-
-    log.info(f"Creating FASTA file from PDB sequences: {args.out_dir}/pdbs.fasta")
-    save_fasta_from_pdbs(args.pdb_dir, args.out_dir)
-    input_fasta = f"{args.out_dir}/pdbs.fasta"
-
-    # Load provided/created FASTA file and write again to args.out_dir
-    fasta_dict = SeqIO.to_dict(SeqIO.parse(input_fasta, "fasta"))
-    log.info(f"Read {len(fasta_dict)} entries from {input_fasta}")
-
-    with open(f"{args.out_dir}/pdbs.fasta", "w") as out_handle:
-        SeqIO.write(fasta_dict.values(), out_handle, "fasta")
-
-    # Create IF-1 embeddings unless argument to skip set
-    if not args.skip_embeddings:
-        log.info(f"Loading ESM-IF1 to embed PDBs")
-        embed_pdbs_IF1(
-            pdb_dir=args.pdb_dir,
-            out_dir=args.pdb_dir,
-            input_fasta=fasta_dict,
-            struc_type=args.struc_type,
-            overwrite_embeddings=args.overwrite_embeddings,
+        log.info(f"Pre-processing PDBs")
+        dataset = Discotope_Dataset_web(
+            tempdir, structure_type=args.struc_type, verbose=args.verbose
         )
 
-    log.info(f"Pre-processing PDBs")
-    dataset = Discotope_Dataset(
-        fasta_dict, args.pdb_dir, IF1_dir=args.pdb_dir, verbose=args.verbose
-    )
+        if len(dataset) == 0:
+            # TODO: Specify what happened
+            log.error("No valid file was supplied.")
+            sys.exit(0)
 
-    if len(dataset) == 0:
-        # TODO: Specify what happened
-        log.error("No valid file was supplied.")
-        sys.exit(0)
+        log.info(f"Loading XGBoost ensemble")
+        models = load_models(args.models_dir)
 
-    log.info(f"Loading XGBoost ensemble")
-    models = load_models(args.models_dir)
+        log.info(f"Predicting on PDBs")
+        save_predictions_from_dataset(
+            dataset, models, args.out_dir, verbose=args.verbose
+        )
 
-    log.info(f"Predicting on PDBs")
-    save_predictions_from_dataset(dataset, models, args.out_dir, verbose=args.verbose)
+        log.info(f"Done!")
 
-    log.info(f"Done!")
+        examples = """<script type="text/javascript">const examples = ["""
 
-    examples = """<script type="text/javascript">const examples = ["""
+        print("<h2>Output download</h2>")
 
-    print("<h2>Output download</h2>")
+        temp_id = "/".join(args.out_dir.rsplit("/", 2)[1:])
 
-    temp_id = "/".join(args.out_dir.rsplit("/", 2)[1:])
-
-    os.system(f"cd {args.out_dir} && zip archive *epi.pdb *.csv > /dev/null 2>&1")
-    print(
-        f'<a href="/services/DiscoTope-3.0/tmp/{temp_id}/archive.zip"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
-    )
-
-    print(
-        """<div class="wrap-collabsible">
-        <input id="collapsible" class="toggle" type="checkbox">
-        <label for="collapsible" class="lbl-toggle">Individual result downloads</label>
-        <div class="collapsible-content">
-        <div class="content-inner">
-        """
-    )
-
-    pdb_chains_dict = dict()
-    for pdb_w_chain_id in fasta_dict.keys():
-        pdb, chain = pdb_w_chain_id.rsplit("_", 1)
-        pdb_chains_dict[pdb] = chain
-
-    for i, sample in enumerate(dataset):
-        outpdb = f"{temp_id}/{sample['pdb_id']}_raw.pdb"
-        outcsv = f"{temp_id}/{sample['pdb_id']}.csv"
-        outcif = f"{temp_id}/{sample['pdb_id']}_raw.cif"
-
-        examples += "{"
-        examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/services/DiscoTope-3.0/tmp/{outcif}',info:'Structure {i+1}'"
-        examples += "},"
-
-        style = 'style="margin-top:2em;"' if i > 0 else ""
+        os.system(f"cd {args.out_dir} && zip archive *epi.pdb *.csv > /dev/null 2>&1")
         print(
-            f"<h3 {style}>{sample['pdb_id']} (chains {'/'.join(pdb_chains_dict[sample['pdb_id']])})</h3>"
+            f'<a href="/services/DiscoTope-3.0/tmp/{temp_id}/archive.zip"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
         )
+
         print(
-            f'<a href="/services/DiscoTope-3.0/tmp/{outpdb}"><p>Download PDB w/ DiscoTope-3.0 prediction scores</p></a>'
+            """<div class="wrap-collabsible">
+            <input id="collapsible" class="toggle" type="checkbox">
+            <label for="collapsible" class="lbl-toggle">Individual result downloads</label>
+            <div class="collapsible-content">
+            <div class="content-inner">
+            """
         )
-        print(f'<a href="/services/DiscoTope-3.0/tmp/{outcsv}"><p>Download CSV</p></a>')
 
-    print("</div></div></div>")
-    examples += "];</script>"
-    print(examples)
+        pdb_chains_dict = dict()
+        for pdb_w_chain_id in fasta_dict.keys():
+            pdb, chain = pdb_w_chain_id.rsplit("_", 1)
+            pdb_chains_dict[pdb] = chain
 
-def check_valid_input(args):
-    """ Checks for valid arguments """
+        for i, sample in enumerate(dataset):
+            outpdb = f"{temp_id}/{sample['pdb_id']}_raw.pdb"
+            outcsv = f"{temp_id}/{sample['pdb_id']}.csv"
+            outcif = f"{temp_id}/{sample['pdb_id']}_raw.cif"
 
-    size_mb = os.stat(args.in_file) / (1024 * 1024)
-    print(size_mb)
+            examples += "{"
+            examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/services/DiscoTope-3.0/tmp/{outcif}',info:'Structure {i+1}'"
+            examples += "},"
 
-    asd
+            style = 'style="margin-top:2em;"' if i > 0 else ""
+            print(
+                f"<h3 {style}>{sample['pdb_id']} (chains {'/'.join(pdb_chains_dict[sample['pdb_id']])})</h3>"
+            )
+            print(
+                f'<a href="/services/DiscoTope-3.0/tmp/{outpdb}"><p>Download PDB w/ DiscoTope-3.0 prediction scores</p></a>'
+            )
+            print(
+                f'<a href="/services/DiscoTope-3.0/tmp/{outcsv}"><p>Download CSV</p></a>'
+            )
+
+        print("</div></div></div>")
+        examples += "];</script>"
+        print(examples)
 
 
 if __name__ == "__main__":
