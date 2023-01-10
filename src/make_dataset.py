@@ -140,13 +140,16 @@ def load_IF1_tensors(
     list_IF1_tensors = []
     list_sequences = []
     for i, pdb_path in enumerate(pdb_files):
-        log.info(f"{i+1} / {len(pdb_files)}: Embedding {pdb_path})")
-        print(f"{i+1} / {len(pdb_files)}: Embedding {pdb_path})")
-        # chain_id = pdbf.split("_")[1][0]
+
+        _pdb = get_basename_no_ext(pdb_path)
+        log.info(f"{i+1} / {len(pdb_files)}: Embedding {_pdb})")
+
         structure = esm.inverse_folding.util.load_structure(str(pdb_path), chain=None)
         coords, seq = esm.inverse_folding.util.extract_coords_from_structure(structure)
         rep = (
-            src.esm_util_custom.get_encoder_output(model, alphabet, coords, seq, device=device)
+            src.esm_util_custom.get_encoder_output(
+                model, alphabet, coords, seq, device=device
+            )
             .detach()
             .cpu()
         )
@@ -414,33 +417,6 @@ def get_atomarray_bfacs(atom_array: biotite.structure.AtomArray) -> np.array:
     return res_bfacs
 
 
-def get_atomarray_diameter_gyrrad(atom_array):
-
-    """
-    Return diameter
-    # https://www.biotite-python.org/examples/gallery/structure/diameter.html#sphx-glr-examples-gallery-structure-diameter-py
-    """
-
-    # Radius of gyration
-    try:
-        # Remove all non-amino acids
-        atom_array = atom_array[biotite.structure.filter_amino_acids(atom_array)]
-        coord = atom_array.coord
-        # Calculate all pairwise difference vectors
-        diff = coord[:, np.newaxis, :] - coord[np.newaxis, :, :]
-        # Calculate absolute of difference vectors -> square distances
-        sq_dist = np.sum(diff * diff, axis=-1)
-        # Maximum distance is diameter
-        diameter = np.sqrt(np.max(sq_dist))
-
-        gyr_rad = biotite.structure.gyration_radius(atom_array)
-    except Exception as E:
-        gyr_rad = np.nan
-        log.error(f"Unable to calculate gyration radius:\n{E}")
-
-    return diameter, gyr_rad
-
-
 def pdb_extract_seq_residx_bfac_rsas_diam(pdb_path, chain_id):
     """
     Input:
@@ -459,7 +435,6 @@ def pdb_extract_seq_residx_bfac_rsas_diam(pdb_path, chain_id):
     seq, res_idxs = get_atomarray_seq_residx(struc_full)
 
     bfacs = get_atomarray_bfacs(struc_full)
-    diam, gyr_rad = get_atomarray_diameter_gyrrad(struc_full)
 
     # Convert sasa to rsa
     sasa = get_atomarray_res_sasa(struc_full)
@@ -467,7 +442,7 @@ def pdb_extract_seq_residx_bfac_rsas_diam(pdb_path, chain_id):
     div_values = [sasa_max_dict[aa] for aa in seq]
     rsa = sasa / div_values
 
-    return seq, res_idxs, bfacs, rsa, diam, gyr_rad
+    return seq, res_idxs, bfacs, rsa
 
 
 class Discotope_Dataset_web(torch.utils.data.Dataset):
@@ -516,11 +491,12 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
         self.verbose = verbose
         self.n_jobs = n_jobs
         self.preprocess = preprocess
+        self.structure_type = structure_type
 
         # Get PDB path dict
         self.list_pdb_files = glob.glob(f"{pdb_dir}/*.pdb")
         if len(self.list_pdb_files) == 0:
-            log.error(f"No files found in {pdb_dir}")
+            log.error(f"No .pdb files found in {pdb_dir}")
             sys.exit(0)
 
         log.info(f"Read {len(self.list_pdb_files)} PDBs from {pdb_dir}")
@@ -566,7 +542,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
         """Processes samples in parallell"""
 
         results = Parallel(n_jobs=n_jobs)(
-            delayed(self.process_sample)(i) for i in range(len(self.key_list))
+            delayed(self.process_sample)(i) for i in range(len(self.list_pdb_files))
         )
         return results
 
@@ -596,8 +572,6 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
                 pdb_res_idxs,
                 pdb_bfacs,
                 pdb_rsas,
-                pdb_diam,
-                pdb_gyrrad,
             ) = pdb_extract_seq_residx_bfac_rsas_diam(pdb_fp, chain_id=None)
 
             # Struc_type 1 and pLDDTs set to B-factors only if AlphaFold structure
@@ -634,12 +608,9 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
             df_stats = pd.DataFrame(
                 {
                     "pdb": pdb_id,
-                    "idx": list(range(1, L + 1)),
+                    "res_id": pdb_res_idxs,
                     "residue": list(seq),
-                    "res_idx": pdb_res_idxs,
                     "rsa": pdb_rsas.flatten(),
-                    "diam": pdb_diam,
-                    "gyrrad": pdb_gyrrad,
                     "pLDDTs": pdb_bfacs.flatten(),
                     "length": lengths.flatten(),
                     "struc_type": struc_type,

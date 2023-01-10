@@ -138,7 +138,7 @@ def get_percentile_score(
 
 def load_models(
     models_dir: str = "models/final__solved_pred/",
-    num_models: int = 40,
+    num_models: int = 100,
     verbose: int = 1,
 ) -> List["xgb.XGBClassifier"]:
     """Loads saved XGBoostClassifier files containing model weights, returns list of XGBoost models"""
@@ -202,7 +202,6 @@ def save_predictions_from_dataset(
     dataset: Discotope_Dataset_web,
     models: List["xgb.XGBClassifier"],
     out_dir: str,
-    calculate_struc_propensity_flag: bool = False,
     verbose: int = 0,
 ) -> None:
     """Loads models, predicts on dataset and saves to out_dir"""
@@ -227,7 +226,6 @@ def save_predictions_from_dataset(
         # Add predictions to antigen dataframe
         df_pdb = sample["df_stats"].copy()
         df_pdb.insert(loc=3, column="Discotope-3.0_score", value=y_hat)
-        df_pdb["epitope"] = df_pdb["residue"].apply(lambda s: s.isupper())
 
         # Write CSV and append to list
         outfile = f"{out_dir}/{sample['pdb_id']}.csv"
@@ -238,98 +236,89 @@ def save_predictions_from_dataset(
         dfs_list.append(df_pdb)
 
         log.info(f"Saving PDBs")
+
         # Write output PDBs with B-factors set to predictions
         struc = prody.parsePDB(sample["pdb_fp"])
 
-        d = {
-            # "epi": sample["y_arr"],
-            "raw": y_hat,
-        }
+        values = y_hat
+        asd
 
-        for label, values in d.items():
-            try:
-                bfacs = ((values - values.min()) / (values.max() - values.min())) * 100
-                struc = prody_set_bfactor(struc, bfacs)
-                prody.writePDB(f"{out_dir}/{sample['pdb_id']}_{label}.pdb", struc)
-                # print(f"Outfile: {out_dir}/{sample['pdb_id']}_{label}.pdb")
-                p = PDBParser(PERMISSIVE=1)
-                structure = p.get_structure(
-                    f"{sample['pdb_id']}_{label}",
-                    f"{out_dir}/{sample['pdb_id']}_{label}.pdb",
+        try:
+            bfacs = ((values - values.min()) / (values.max() - values.min())) * 100
+            struc = prody_set_bfactor(struc, bfacs)
+            prody.writePDB(f"{out_dir}/{sample['pdb_id']}_{label}.pdb", struc)
+            p = PDBParser(PERMISSIVE=1)
+            structure = p.get_structure(
+                f"{sample['pdb_id']}_{label}",
+                f"{out_dir}/{sample['pdb_id']}_{label}.pdb",
+            )
+            io = MMCIFIO()
+            io.set_structure(structure)
+            io.save(f"{out_dir}/{sample['pdb_id']}_{label}.tmp.cif", Clean_Chain(bfacs))
+            with open(
+                f"{out_dir}/{sample['pdb_id']}_{label}.tmp.cif", "r"
+            ) as infile, open(
+                f"{out_dir}/{sample['pdb_id']}_{label}.cif", "w"
+            ) as outfile:
+                outfile.write(infile.readline())
+                print(
+                    "#",
+                    "loop_",
+                    "_ma_qa_metric.id",
+                    "_ma_qa_metric.mode",
+                    "_ma_qa_metric.name",
+                    "_ma_qa_metric.software_group_id",
+                    "_ma_qa_metric.type",
+                    "1 global pLDDT 1 pLDDT",
+                    "2 local  pLDDT 1 pLDDT",
+                    sep="\n",
+                    file=outfile,
                 )
-                io = MMCIFIO()
-                io.set_structure(structure)
-                io.save(
-                    f"{out_dir}/{sample['pdb_id']}_{label}.tmp.cif", Clean_Chain(bfacs)
+                print(
+                    "#",
+                    "loop_",
+                    "_ma_qa_metric_local.label_asym_id",
+                    "_ma_qa_metric_local.label_comp_id",
+                    "_ma_qa_metric_local.label_seq_id",
+                    "_ma_qa_metric_local.metric_id",
+                    "_ma_qa_metric_local.metric_value",
+                    "_ma_qa_metric_local.model_id",
+                    "_ma_qa_metric_local.ordinal_id",
+                    sep="\n",
+                    file=outfile,
                 )
-                with open(
-                    f"{out_dir}/{sample['pdb_id']}_{label}.tmp.cif", "r"
-                ) as infile, open(
-                    f"{out_dir}/{sample['pdb_id']}_{label}.cif", "w"
-                ) as outfile:
-                    outfile.write(infile.readline())
-                    print(
-                        "#",
-                        "loop_",
-                        "_ma_qa_metric.id",
-                        "_ma_qa_metric.mode",
-                        "_ma_qa_metric.name",
-                        "_ma_qa_metric.software_group_id",
-                        "_ma_qa_metric.type",
-                        "1 global pLDDT 1 pLDDT",
-                        "2 local  pLDDT 1 pLDDT",
-                        sep="\n",
-                        file=outfile,
-                    )
-                    print(
-                        "#",
-                        "loop_",
-                        "_ma_qa_metric_local.label_asym_id",
-                        "_ma_qa_metric_local.label_comp_id",
-                        "_ma_qa_metric_local.label_seq_id",
-                        "_ma_qa_metric_local.metric_id",
-                        "_ma_qa_metric_local.metric_value",
-                        "_ma_qa_metric_local.model_id",
-                        "_ma_qa_metric_local.ordinal_id",
-                        sep="\n",
-                        file=outfile,
-                    )
 
-                    info_header = list()
-                    for i in range(20):
-                        info_header.append(infile.readline().strip())
+                info_header = list()
+                for i in range(20):
+                    info_header.append(infile.readline().strip())
 
-                    atoms_cif = [x.strip() for x in infile.readlines()][:-1]
-                    previous_resid = None
+                atoms_cif = [x.strip() for x in infile.readlines()][:-1]
+                previous_resid = None
 
-                    for entry in atoms_cif:
-                        if previous_resid is None or previous_resid != int(
-                            entry[26:30]
-                        ):
-                            qa_metric = [" " for _ in range(24)]
-                            auth_id = entry.split()[15]
-                            # qa_metric[20:20+len(auth_id)] = auth_id
-                            qa_metric[-4:] = entry[26:30]
-                            qa_metric[0] = entry[22]
-                            qa_metric[2:5] = entry[18:21]
-                            qa_metric[6 : 6 + len(auth_id)] = auth_id
-                            # qa_metric[6:10] = entry[26:30]
-                            qa_metric[10] = "2"
-                            qa_metric[12:17] = "{:.6f}".format(
-                                float(entry.split()[14])
-                            )[:5]
-                            qa_metric[18] = "1"
-                            previous_resid = int(entry[26:30])
-                            print("".join(qa_metric), file=outfile)
+                for entry in atoms_cif:
+                    if previous_resid is None or previous_resid != int(entry[26:30]):
+                        qa_metric = [" " for _ in range(24)]
+                        auth_id = entry.split()[15]
+                        # qa_metric[20:20+len(auth_id)] = auth_id
+                        qa_metric[-4:] = entry[26:30]
+                        qa_metric[0] = entry[22]
+                        qa_metric[2:5] = entry[18:21]
+                        qa_metric[6 : 6 + len(auth_id)] = auth_id
+                        # qa_metric[6:10] = entry[26:30]
+                        qa_metric[10] = "2"
+                        qa_metric[12:17] = "{:.6f}".format(float(entry.split()[14]))[:5]
+                        qa_metric[18] = "1"
+                        previous_resid = int(entry[26:30])
+                        print("".join(qa_metric), file=outfile)
 
-                    for info in info_header:
-                        print(info, file=outfile)
-                    for entry in atoms_cif:
-                        print(entry, file=outfile)
-                    print("#", file=outfile)
+                for info in info_header:
+                    print(info, file=outfile)
+                for entry in atoms_cif:
+                    print(entry, file=outfile)
+                print("#", file=outfile)
 
-            except Exception as E:
-                log.error(f"Unable to write prediction PDB: {E}")
+        except Exception as E:
+            log.error(f"Unable to write prediction PDB: {E}")
 
     # Merge and calculate performance
     df_all = pd.concat(dfs_list, ignore_index=False)
@@ -531,6 +520,7 @@ def main(args):
     # Create temporary directory
     with tempfile.TemporaryDirectory() as tempdir:
 
+        # Download PDBs from RCSB or AlphaFoldDB
         if args.list_file:
             log.info(f"Fetching PDBs")
             fetch_and_process_from_list_file(args.list_file, tempdir, tempdir)
@@ -552,13 +542,13 @@ def main(args):
             tempdir, structure_type=args.struc_type, verbose=args.verbose
         )
 
-        if len(dataset) == 0:
-            # TODO: Specify what happened
-            log.error("No valid file was supplied.")
-            sys.exit(0)
+        print(dataset, len(dataset))
+        import pdb
+
+        pdb.set_trace()
 
         log.info(f"Loading XGBoost ensemble")
-        models = load_models(args.models_dir)
+        models = load_models(args.models_dir, num_models=2)  # MH
 
         log.info(f"Predicting on PDBs")
         save_predictions_from_dataset(
