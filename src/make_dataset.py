@@ -442,7 +442,7 @@ def pdb_extract_seq_residx_bfac_rsas_diam(pdb_path, chain_id):
     div_values = [sasa_max_dict[aa] for aa in seq]
     rsa = sasa / div_values
 
-    return seq, res_idxs, bfacs, rsa
+    return struc_full, seq, res_idxs, bfacs, rsa
 
 
 class Discotope_Dataset_web(torch.utils.data.Dataset):
@@ -568,6 +568,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
 
             # Extract values from PDB
             (
+                struc_full,
                 pdb_seq,
                 pdb_res_idxs,
                 pdb_bfacs,
@@ -600,7 +601,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
                 "sequence": range(512, 532),
                 "pLDDTs": range(532, 533),
                 "lengths": range(533, 534),
-                "struc_type": range(534, 535),
+                "alphafold_struc_flag": range(534, 535),
                 "RSAs": range(535, 536),
             }
 
@@ -613,7 +614,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
                     "rsa": pdb_rsas.flatten(),
                     "pLDDTs": pdb_bfacs.flatten(),
                     "length": lengths.flatten(),
-                    "struc_type": struc_type,
+                    "alphafold_struc_flag": struc_type,
                 }
             )
 
@@ -628,7 +629,8 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
                 "sequence_str": seq,
                 "pdb_seq": pdb_seq,
                 "feature_idxs": feature_idxs,
-                "struc_type": struc_type,
+                "alphafold_struc_flag": struc_type,
+                "PDB_biotite": struc_full,
             }
 
             return output_dict

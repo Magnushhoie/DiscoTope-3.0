@@ -4,17 +4,24 @@
 MAX_FILES = 50
 MAX_FILE_SIZE_MB = 30
 
-# import glob
 import logging
+
+logging.basicConfig(level=logging.INFO, format="[{asctime}] {message}", style="{")
+log = logging.getLogger(__name__)
+
 import os
+import shutil
 import sys
 import tempfile
+import time
 from contextlib import closing
 # Set project path two levels up
 from pathlib import Path
 from typing import List
 from zipfile import ZipFile
 
+import biotite
+import biotite.structure.io as strucio
 import numpy as np
 import pandas as pd
 import prody  # MH can rewrite with Biotite?
@@ -64,7 +71,7 @@ def cmdline_args():
 
     p.add_argument(
         "-f",
-        "--in_file",
+        "--pdb_or_zip_file",
         dest="pdb_or_zip_file",
         help="Input file, either single PDB or compressed zip file with multiple PDBs",
         type=lambda x: is_valid_path(p, x),
@@ -82,7 +89,7 @@ def cmdline_args():
     )
 
     p.add_argument(
-        "--id_type",
+        "--list_id_type",
         help="PDB ID type (rcsb or uniprot)",
     )
 
@@ -198,6 +205,52 @@ def get_auc(y_true, y_pred, sig_dig=5):
     return auc
 
 
+def write_model_prediction_csvs_pdbs(
+    models, dataset, out_dir, verbose: int = 0
+) -> None:
+    """Calculates predictions for dataset PDBs, saves output .csv and .pdb file"""
+
+    for i, sample in enumerate(dataset):
+        try:
+            # Predict on antigen features
+            y_hat = predict_using_models(models, sample["X_arr"])
+            sample["y_hat"] = y_hat
+            # sample["df_stats"].insert(4, "DiscoTope-3.0_score", y_hat)
+
+            # Output CSV
+            df_out = sample["df_stats"]
+            df_out.insert(4, "DiscoTope-3.0_score", y_hat)
+
+            # Round to 5 digits
+            num_cols = ["DiscoTope-3.0_score", "rsa"]
+            df_out[num_cols] = df_out[num_cols].applymap(lambda x: "{:.5f}".format(x))
+
+            # Write to CSV
+            outfile = f"{out_dir}/{sample['pdb_id']}_discotope3.csv"
+            if verbose:
+                log.info(f"Writing {sample['pdb_id']} to {outfile}")
+            df_out.to_csv(outfile)
+
+        except Exception as E:
+            log.error(f"Unable to calculate/write predictions CSV: {E}")
+
+        try:
+            # Set B-factor field to DiscoTope-3.0 score
+            atom_array = sample["PDB_biotite"]
+            target_values = sample["y_hat"]
+            atom_array = biotite.structure.renumber_res_ids(atom_array)
+            atom_array.b_factor = target_values[atom_array.res_id - 1]
+
+            # Write PDB
+            outfile = f"{out_dir}/{sample['pdb_id']}_discotope3.pdb"
+            if verbose:
+                log.info(f"Writing {sample['pdb_id']} to {outfile}")
+            strucio.save_structure(outfile, atom_array)
+
+        except Exception as E:
+            log.error(f"Unable to calculate/write predictions PDB: {E}")
+
+
 def save_predictions_from_dataset(
     dataset: Discotope_Dataset_web,
     models: List["xgb.XGBClassifier"],
@@ -241,7 +294,6 @@ def save_predictions_from_dataset(
         struc = prody.parsePDB(sample["pdb_fp"])
 
         values = y_hat
-        asd
 
         try:
             bfacs = ((values - values.min()) / (values.max() - values.min())) * 100
@@ -429,14 +481,14 @@ def fetch_and_process_from_list_file(list_file, out_dir):
         sys.exit(0)
 
     for prot_id in pdb_list:
-        if args.id_type == "uniprot":
+        if args.list_id_type == "uniprot":
             URL = f"https://alphafold.ebi.ac.uk/files/AF-{prot_id}-F1-model_v4.pdb"
             score = None
-        elif args.id_type == "rcsb":
+        elif args.list_id_type == "rcsb":
             URL = f"https://files.rcsb.org/download/{prot_id}.pdb"
             score = 100
         else:
-            log.error(f"Structure ID was of unknown type {args.id_type}")
+            log.error(f"Structure ID was of unknown type {args.list_id_type}")
             sys.exit(0)
 
         response = requests.get(URL)
@@ -479,8 +531,9 @@ def check_valid_input(args):
         log.error(f"No input PDB or list file given")
         sys.exit(0)
 
-    if args.list_file and not args.id_type:
-        log.error(f"Must provide id_type (rcsb or uniprot) with list_file")
+    if args.list_file and not args.list_id_type:
+        log.error(f"Must provide list_id_type (rcsb or uniprot) with list_file")
+        sys.exit()
 
     if args.struc_type not in ["solved", "alphafold"]:
         log.error(
@@ -511,6 +564,31 @@ def check_valid_input(args):
             sys.exit(0)
 
 
+def write_predictions_zip_file(
+    predictions_dir: str, out_dir: str, verbose: int = 0
+) -> str:
+    """Returns filepath for compressed predictions zip stored in out_dir"""
+    timestamp = time.strftime("%Y%m%d%H%M")
+    outbasename = f"discotope3_{timestamp}"
+
+    if args.verbose:
+        log.info(f"Compressing ZIP file {outbasename}.zip")
+
+    shutil.make_archive(
+        f"{outbasename}",
+        "zip",
+        root_dir=predictions_dir,
+    )
+
+    return f"{outbasename}.zip"
+
+
+def check_missing_pdb_csv_files(out_dir):
+    """Prints missing csv or pdb files"""
+    print("check_missing_pdb_csv_files not implemented")
+    pass
+
+
 def main(args):
     """Main function"""
 
@@ -537,35 +615,38 @@ def main(args):
             sys.exit(0)
             pass
 
+        # Fetch PDB dict
+
         log.info(f"Pre-processing PDBs")
         dataset = Discotope_Dataset_web(
             tempdir, structure_type=args.struc_type, verbose=args.verbose
         )
 
-        print(dataset, len(dataset))
-        import pdb
-
-        pdb.set_trace()
-
         log.info(f"Loading XGBoost ensemble")
         models = load_models(args.models_dir, num_models=2)  # MH
 
-        log.info(f"Predicting on PDBs")
-        save_predictions_from_dataset(
-            dataset, models, args.out_dir, verbose=args.verbose
+        log.info(f"Writing prediction .csv and .pdb files")
+        write_model_prediction_csvs_pdbs(
+            models, dataset, out_dir=args.out_dir, verbose=args.verbose
         )
 
+        # Zip output folder
+        log.info(f"Writing predictions CSV file")
+        temp_id = "/".join(args.out_dir.rsplit("/", 2)[1:])
+        job_out_dir = f"/services/DiscoTope-3.0/tmp/{temp_id}"
+        out_zip = write_predictions_zip_file(
+            predictions_dir=tempdir, out_dir=job_out_dir, verbose=args.verbose
+        )
+
+        # Check which files failed
+        check_missing_pdb_csv_files(args.tempdir)
         log.info(f"Done!")
 
+        # HTML printing
         examples = """<script type="text/javascript">const examples = ["""
-
         print("<h2>Output download</h2>")
-
-        temp_id = "/".join(args.out_dir.rsplit("/", 2)[1:])
-
-        os.system(f"cd {args.out_dir} && zip archive *epi.pdb *.csv > /dev/null 2>&1")
         print(
-            f'<a href="/services/DiscoTope-3.0/tmp/{temp_id}/archive.zip"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
+            f'<a href="{out_zip}"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
         )
 
         print(
@@ -583,12 +664,11 @@ def main(args):
             pdb_chains_dict[pdb] = chain
 
         for i, sample in enumerate(dataset):
-            outpdb = f"{temp_id}/{sample['pdb_id']}_raw.pdb"
-            outcsv = f"{temp_id}/{sample['pdb_id']}.csv"
-            outcif = f"{temp_id}/{sample['pdb_id']}_raw.cif"
+            outpdb = f"{temp_id}/{sample['pdb_id']}_discotope3.pdb"
+            outcsv = f"{temp_id}/{sample['pdb_id']}_discotope3.csv"
 
             examples += "{"
-            examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/services/DiscoTope-3.0/tmp/{outcif}',info:'Structure {i+1}'"
+            examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/services/DiscoTope-3.0/tmp/{outpdb}',info:'Structure {i+1}'"
             examples += "},"
 
             style = 'style="margin-top:2em;"' if i > 0 else ""
@@ -620,8 +700,12 @@ if __name__ == "__main__":
     )
     log = logging.getLogger(__name__)
     log.info("Predicting PDBs using Discotope-3.0")
-
     os.makedirs(args.out_dir, exist_ok=True)
     os.makedirs(args.pdb_dir, exist_ok=True)
 
-    main(args)
+    try:
+        main(args)
+    except Exception as E:
+        log.exception(
+            "Prediction encountered an unexpected error. This is likely a bug in the server software."
+        )
