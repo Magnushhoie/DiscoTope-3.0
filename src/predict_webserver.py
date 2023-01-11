@@ -9,7 +9,9 @@ import logging
 logging.basicConfig(level=logging.INFO, format="[{asctime}] {message}", style="{")
 log = logging.getLogger(__name__)
 
+import glob
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -45,17 +47,23 @@ from make_dataset import Discotope_Dataset_web
 def cmdline_args():
     # Make parser object
     usage = f"""
-    # Predict on example PDBs in folder
-    python src/predict_pdb.py \
-    --pdb_dir data/test \
-    --struc_type solved \
-    --out_dir job_out/test
+Options:
+    1) PDB file (--pdb_or_zip_file)
+    2) Zip file of PDBs (--pdb_or_zip_file)
+    3) PDB directory (--pdb_dir)
+    4) File with PDB ids on each line (--list_file)
 
-    # Predict only on PDBs IDs specified in antigens.fasta entries
-    python src/predict_pdb.py \
-    --fasta data/test.fasta \
-    --pdb_dir pdbs_embeddings \
-    --out_dir job_out/test
+# Predict on example PDBs in folder
+python src/predict_webserver.py \
+--pdb_dir data/test \
+--struc_type solved \
+--out_dir job_out/test
+
+# Predict only on PDBs IDs specified in antigens.fasta entries
+python src/predict_webserver.py \
+--fasta data/test.fasta \
+--pdb_dir pdbs_embeddings \
+--out_dir job_out/test
     """
     p = ArgumentParser(
         description="Predict Discotope-3.0 score on folder of input AF2 PDBs",
@@ -527,8 +535,15 @@ def check_valid_input(args):
     """Checks for valid arguments"""
 
     # Check input arguments
-    if not (args.pdb_or_zip_file or args.list_file):
-        log.error(f"No input PDB or list file given")
+    if not (args.pdb_or_zip_file or args.pdb_dir or args.list_file):
+        log.error(
+            f"""Please choose one of:
+        1) PDB file (--pdb_or_zip_file)
+        2) Zip file with PDBs (--pdb_or_zip_file)
+        3) PDB directory (--pdb_dir)
+        4) File with PDB ids on each line (--list_file)
+        """
+        )
         sys.exit(0)
 
     if args.list_file and not args.list_id_type:
@@ -541,27 +556,44 @@ def check_valid_input(args):
         )
         sys.exit(0)
 
-    # Check file-size
-    size_mb = os.stat(args.pdb_or_zip_file).st_size / (1024 * 1024)
-    if size_mb > MAX_FILES:
-        log.error(f"Max file-size {MAX_FILE_SIZE_MB} MB, found {round(size_mb)} MB")
+    if (
+        (args.pdb_dir and args.list_file)
+        or (args.pdb_dir and args.pdb_or_zip_file)
+        or (args.list_file and args.pdb_or_zip_file)
+    ):
+        log.error(
+            f"Please choose only one of flags: pdb_dir, list_file or pdb_or_zip_file"
+        )
         sys.exit(0)
 
-    if true_if_zip(args.pdb_or_zip_file):
-        with closing(ZipFile(args.pdb_or_zip_file)) as archive:
-            file_count = len(archive.infolist())
-            file_names = archive.namelist()
+    if args.pdb_dir and args.pdb_or_zip_file:
+        log.error(f"Both pdb_dir and list_file flags set, please chooose one")
+        sys.exit(0)
 
-        # Check number of files in zip
-        if file_count > MAX_FILES:
-            log.error(f"Max number of files {file_count}, found {file_count}")
+    # Check ZIP max-size, number of files
+    if args.pdb_or_zip_file:
+        size_mb = os.stat(args.pdb_or_zip_file).st_size / (1024 * 1024)
+        if size_mb > MAX_FILES:
+            log.error(f"Max file-size {MAX_FILE_SIZE_MB} MB, found {round(size_mb)} MB")
             sys.exit(0)
 
-        # Check filenames end in .pdb
-        name = file_names[0]
-        if os.path.splitext(name)[-1] != ".pdb":
-            log.error(f"Ensure all ZIP content file-names end in .pdb, found {name}")
-            sys.exit(0)
+        if true_if_zip(args.pdb_or_zip_file):
+            with closing(ZipFile(args.pdb_or_zip_file)) as archive:
+                file_count = len(archive.infolist())
+                file_names = archive.namelist()
+
+            # Check number of files in zip
+            if file_count > MAX_FILES:
+                log.error(f"Max number of files {file_count}, found {file_count}")
+                sys.exit(0)
+
+            # Check filenames end in .pdb
+            name = file_names[0]
+            if os.path.splitext(name)[-1] != ".pdb":
+                log.error(
+                    f"Ensure all ZIP content file-names end in .pdb, found {name}"
+                )
+                sys.exit(0)
 
 
 def write_predictions_zip_file(
@@ -583,10 +615,38 @@ def write_predictions_zip_file(
     return f"{outbasename}.zip"
 
 
-def check_missing_pdb_csv_files(out_dir):
-    """Prints missing csv or pdb files"""
-    print("check_missing_pdb_csv_files not implemented")
-    pass
+def get_basename_no_ext(filepath):
+    """
+    Returns file basename excluding extension,
+    e.g. dir/5kja_A.pdb -> 5kja_A
+    """
+    return os.path.splitext(os.path.basename(filepath))[0]
+
+
+def get_directory_basename_dict(directory: str, glob_ext: str) -> dict:
+    """
+    Returns dict of file basenames ending with glob_ext
+    E.g. get_directory_basename_dict(pdb_dir, "*.pdb")
+    Returns: {'7k7i_B': '../data/mini/7k7i_B.pdb'}
+    """
+    dir_list = glob.glob(f"{directory}/{glob_ext}")
+    return {get_basename_no_ext(fp): fp for fp in dir_list}
+
+
+def check_missing_pdb_csv_files(in_dir, out_dir) -> None:
+    """Reports missing CSV and PDB file in out_dir, per PDB file in in_dir"""
+
+    # Get basenames of input PDBs and output PDB/CSV files
+    in_pdb_dict = get_directory_basename_dict(in_dir, "*.pdb")
+    out_dict = get_directory_basename_dict(out_dir, "*.[pdb|csv]*")
+
+    # Remove _discotope3 extension before comparison
+    out_dict = {re.sub(r"_discotope3$", "", k): v for k, v in out_dict.items()}
+
+    # Log which input files are not found in output
+    missing_pdbs = in_pdb_dict.keys() - out_dict.keys()
+    if len(missing_pdbs) > 0:
+        log.error(f"Error: Failed processing PDBs {''.join(list(missing_pdbs))}")
 
 
 def main(args):
@@ -596,32 +656,37 @@ def main(args):
     check_valid_input(args)
 
     # Create temporary directory
-    with tempfile.TemporaryDirectory() as tempdir:
+    with tempfile.TemporaryDirectory() as pdb_or_tempdir:
 
-        # Download PDBs from RCSB or AlphaFoldDB
+        # 1. Download PDBs from RCSB or AlphaFoldDB
         if args.list_file:
             log.info(f"Fetching PDBs")
-            fetch_and_process_from_list_file(args.list_file, tempdir, tempdir)
+            fetch_and_process_from_list_file(
+                args.list_file, pdb_or_tempdir, pdb_or_tempdir
+            )
 
-        # Unzip if ZIP
-        if true_if_zip(args.pdb_or_zip_file):
-            log.info(f"Unzipping PDBs")
-            zf = ZipFile(args.pdb_or_zip_file)
-            zf.extractall(tempdir)
+        # 2. Unzip if ZIP, else single PDB
+        if args.pdb_or_zip_file:
+            if true_if_zip(args.pdb_or_zip_file):
+                log.info(f"Unzipping PDBs")
+                zf = ZipFile(args.pdb_or_zip_file)
+                zf.extractall(pdb_or_tempdir)
 
-        # Else single PDB
-        else:
-            print("Not implemented")
-            sys.exit(0)
-            pass
+            # 3. If single PDB, copy to tempdir
+            else:
+                shutil.copy(args.pdb_or_zip_file, pdb_or_tempdir)
 
-        # Fetch PDB dict
+        # 4. Load from PDB folder
+        if args.pdb_dir:
+            pdb_or_tempdir = args.pdb_dir
 
+        # Embed and predict
         log.info(f"Pre-processing PDBs")
         dataset = Discotope_Dataset_web(
-            tempdir, structure_type=args.struc_type, verbose=args.verbose
+            pdb_or_tempdir, structure_type=args.struc_type, verbose=args.verbose
         )
 
+        # Predict and save
         log.info(f"Loading XGBoost ensemble")
         models = load_models(args.models_dir, num_models=2)  # MH
 
@@ -632,15 +697,16 @@ def main(args):
 
         # Zip output folder
         log.info(f"Writing predictions CSV file")
-        temp_id = "/".join(args.out_dir.rsplit("/", 2)[1:])
-        job_out_dir = f"/services/DiscoTope-3.0/tmp/{temp_id}"
+        # temp_id = "/".join(args.out_dir.rsplit("/", 2)[1:])
+        # job_out_dir = f"/services/DiscoTope-3.0/tmp/{temp_id}"
         out_zip = write_predictions_zip_file(
-            predictions_dir=tempdir, out_dir=job_out_dir, verbose=args.verbose
+            predictions_dir=pdb_or_tempdir, out_dir=args.out_dir, verbose=args.verbose
         )
 
         # Check which files failed
-        check_missing_pdb_csv_files(args.tempdir)
+        check_missing_pdb_csv_files(pdb_or_tempdir, args.out_dir)
         log.info(f"Done!")
+        asd
 
         # HTML printing
         examples = """<script type="text/javascript">const examples = ["""
@@ -688,7 +754,6 @@ def main(args):
 
 
 if __name__ == "__main__":
-    # print("<h3>Debugging output</h3>")
 
     args = cmdline_args()
     logging.basicConfig(
@@ -697,6 +762,7 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="[{asctime}] {message}",
         style="{",
+        handlers=[logging.FileHandler("debug.log"), logging.StreamHandler(sys.stdout)],
     )
     log = logging.getLogger(__name__)
     log.info("Predicting PDBs using Discotope-3.0")

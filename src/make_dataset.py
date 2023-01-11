@@ -142,7 +142,7 @@ def load_IF1_tensors(
     for i, pdb_path in enumerate(pdb_files):
 
         _pdb = get_basename_no_ext(pdb_path)
-        log.info(f"{i+1} / {len(pdb_files)}: Embedding {_pdb})")
+        log.info(f"{i+1} / {len(pdb_files)}: Embedding {_pdb}")
 
         structure = esm.inverse_folding.util.load_structure(str(pdb_path), chain=None)
         coords, seq = esm.inverse_folding.util.extract_coords_from_structure(structure)
