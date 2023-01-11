@@ -5,6 +5,7 @@ logging.basicConfig(level=logging.INFO, format="[{asctime}] {message}", style="{
 log = logging.getLogger(__name__)
 
 import os
+import re
 import sys
 # Set project path two levels up
 from pathlib import Path
@@ -123,6 +124,8 @@ def cmdline_args():
 
 def load_IF1_tensors(
     pdb_files: List,
+    check_existing=True,
+    save_embeddings=True,
     verbose: int = 1,
 ) -> List:
     """Embeds PDBs using IF1, returns list"""
@@ -135,29 +138,54 @@ def load_IF1_tensors(
     model = model.eval()
 
     # Check device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
     list_IF1_tensors = []
+    list_structures = []
     list_sequences = []
     for i, pdb_path in enumerate(pdb_files):
 
         _pdb = get_basename_no_ext(pdb_path)
-        log.info(f"{i+1} / {len(pdb_files)}: Embedding {_pdb}")
 
-        structure = esm.inverse_folding.util.load_structure(str(pdb_path), chain=None)
-        coords, seq = esm.inverse_folding.util.extract_coords_from_structure(structure)
-        rep = (
-            src.esm_util_custom.get_encoder_output(
-                model, alphabet, coords, seq, device=device
+        # Load if already exists
+        embed_file = re.sub(r".pdb$", ".pt", pdb_path)
+        if check_existing and os.path.exists(embed_file):
+            log.info(
+                f"{i+1} / {len(pdb_files)}: Loading existing embedding file for {_pdb}: {embed_file}"
             )
-            .detach()
-            .cpu()
-        )
+            rep = torch.load(embed_file)
+
+        # Else, embed
+        else:
+            log.info(f"{i+1} / {len(pdb_files)}: Embedding {_pdb}")
+            # structure = esm.inverse_folding.util.load_structure()
+            structure, structure_full = load_structure_discotope(
+                str(pdb_path), chain=None
+            )
+            coords, seq = esm.inverse_folding.util.extract_coords_from_structure(
+                structure
+            )
+
+            # Embed on CPU if PDB is too large
+            if len(seq) >= 1000:
+                device = "cpu"
+            else:
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+            rep = (
+                src.esm_util_custom.get_encoder_output(
+                    model, alphabet, coords, seq, device=device
+                )
+                .detach()
+                .cpu()
+            )
+
+            if save_embeddings:
+                torch.save(rep, embed_file)
 
         list_IF1_tensors.append(rep)
+        list_structures.append(structure_full)
         list_sequences.append(seq)
 
-    return list_IF1_tensors, list_sequences
+    return list_IF1_tensors, list_structures, list_sequences
 
 
 def get_basename_no_ext(filepath):
@@ -417,7 +445,7 @@ def get_atomarray_bfacs(atom_array: biotite.structure.AtomArray) -> np.array:
     return res_bfacs
 
 
-def pdb_extract_seq_residx_bfac_rsas_diam(pdb_path, chain_id):
+def structure_extract_seq_residx_bfac_rsas_diam(struc_full, chain_id):
     """
     Input:
         pdb_path: PDB file path (str)
@@ -430,19 +458,19 @@ def pdb_extract_seq_residx_bfac_rsas_diam(pdb_path, chain_id):
 
     # pdbf = fastpdb.PDBFile.read(pdb_path)
     # structure = pdbf.get_structure(model=1, extra_fields=["b_factor"])
-    _, struc_full = load_structure_discotope(pdb_path, chain_id)
+    # _, struc_full = load_structure_discotope(pdb_path, chain_id)
 
+    # Renumber
+    struc_full = biotite.structure.renumber_res_ids(struc_full, start=1)
     seq, res_idxs = get_atomarray_seq_residx(struc_full)
-
     bfacs = get_atomarray_bfacs(struc_full)
 
     # Convert sasa to rsa
     sasa = get_atomarray_res_sasa(struc_full)
-    seq = seq.upper()
-    div_values = [sasa_max_dict[aa] for aa in seq]
+    div_values = [sasa_max_dict[aa] for aa in seq.upper()]
     rsa = sasa / div_values
 
-    return struc_full, seq, res_idxs, bfacs, rsa
+    return seq, res_idxs, bfacs, rsa
 
 
 class Discotope_Dataset_web(torch.utils.data.Dataset):
@@ -483,6 +511,8 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
         self,
         pdb_dir: str,
         structure_type: int,  # alphafold or solved
+        check_existing: bool = True,  # Try to load previous embedding files
+        save_embeddings: bool = True,  # Save new embedding files
         preprocess: bool = True,
         n_jobs: int = 1,
         verbose: int = 0,
@@ -492,6 +522,8 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
         self.n_jobs = n_jobs
         self.preprocess = preprocess
         self.structure_type = structure_type
+        self.check_existing = check_existing
+        self.save_embeddings = save_embeddings
 
         # Get PDB path dict
         self.list_pdb_files = glob.glob(f"{pdb_dir}/*.pdb")
@@ -504,8 +536,14 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
         if self.preprocess:
 
             # Read in IF1 tensors
-            self.list_IF1_tensors, self.list_sequences = load_IF1_tensors(
-                self.list_pdb_files
+            (
+                self.list_IF1_tensors,
+                self.list_structures,
+                self.list_sequences,
+            ) = load_IF1_tensors(
+                self.list_pdb_files,
+                check_existing=args.check_existing,
+                save_embeddings=args.save_existing,
             )
 
             # Remaining pre-processing
@@ -513,16 +551,21 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
                 n_jobs=self.n_jobs
             )
 
+            # Filter out failed samples
+            print(f"Before filter: {len(self.preprocessed_dataset)}")
+            self.preprocessed_dataset = [d for d in self.preprocessed_dataset if d]
+            print(f"After filter: {len(self.preprocessed_dataset)}")
+
         else:
             self.preprocessed_dataset = []
-            log.error(f"Must pre-process Discotope_Dataset with")
+            log.error(f"Must pre-process Discotope_Dataset")
             sys.exit()
 
     def one_hot_encode(self, seq: str):
         """One-hot encodes amino-acids to 20 dims"""
         seq = seq.upper()
         mapping = dict(zip("ACDEFGHIKLMNPQRSTVWY", range(20)))
-        seq2 = [mapping[i] for i in seq]
+        seq2 = [mapping[aa] for aa in seq]
         return np.eye(20)[seq2]
 
     def one_hot_decode(self, one_hot):
@@ -557,23 +600,22 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
         pdb_id = get_basename_no_ext(pdb_fp)
         log.info(f"Processing {idx+1} / {len(self.list_pdb_files)}: PDB {pdb_id}")
 
-        # Read variables
-        IF1_tensor = self.list_IF1_tensors[idx]
-        seq = self.list_sequences[idx]
-        seq_onehot = self.one_hot_encode(seq)
-        L = len(seq)
-
         try:
+            # Read variables
+            IF1_tensor = self.list_IF1_tensors[idx]
+            struc_full = self.list_structures[idx]
+            seq = self.list_sequences[idx]
+            seq_onehot = self.one_hot_encode(seq)
+            L = len(seq)
             lengths = np.array([L] * L)
 
             # Extract values from PDB
             (
-                struc_full,
                 pdb_seq,
                 pdb_res_idxs,
                 pdb_bfacs,
                 pdb_rsas,
-            ) = pdb_extract_seq_residx_bfac_rsas_diam(pdb_fp, chain_id=None)
+            ) = structure_extract_seq_residx_bfac_rsas_diam(struc_full, chain_id=None)
 
             # Struc_type 1 and pLDDTs set to B-factors only if AlphaFold structure
             if self.structure_type == "alphafold":
@@ -636,12 +678,11 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
             return output_dict
 
         except Exception as E:
-            log.error(f"Error: PDB id {pdb_id}, length {len(seq)} from {pdb_fp}: {E}")
+            log.error(f"Error processing PDB id {pdb_id}, from {pdb_fp}: {E}")
             import traceback
 
             traceback.print_exc()
-            return pdb_id
-        #    #raise Exception
+            return False
 
     def __len__(self):
         return len(self.preprocessed_dataset)

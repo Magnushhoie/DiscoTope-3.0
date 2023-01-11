@@ -103,9 +103,8 @@ python src/predict_webserver.py \
 
     p.add_argument(
         "--pdb_dir",
-        default="data/pdbs",
         help="Directory with AF2 PDBs",
-        # type=lambda x: is_valid_path(p, x),
+        type=lambda x: is_valid_path(p, x),
     )
 
     p.add_argument(
@@ -236,27 +235,37 @@ def write_model_prediction_csvs_pdbs(
             # Write to CSV
             outfile = f"{out_dir}/{sample['pdb_id']}_discotope3.csv"
             if verbose:
-                log.info(f"Writing {sample['pdb_id']} to {outfile}")
+                log.info(
+                    f"Writing {sample['pdb_id']} ({i+1}/{len(dataset)}) to {outfile}"
+                )
             df_out.to_csv(outfile)
 
         except Exception as E:
-            log.error(f"Unable to calculate/write predictions CSV: {E}")
+            log.error(
+                f"PDB {sample['pdb_id']} {i+1}/{len(dataset)}: Unable to write predictions CSV: {E}"
+            )
 
         try:
             # Set B-factor field to DiscoTope-3.0 score
             atom_array = sample["PDB_biotite"]
             target_values = sample["y_hat"]
-            atom_array = biotite.structure.renumber_res_ids(atom_array)
+            atom_array = biotite.structure.renumber_res_ids(
+                atom_array, start=1
+            )  # Unnecessary, already done in pre-processing
             atom_array.b_factor = target_values[atom_array.res_id - 1]
 
             # Write PDB
             outfile = f"{out_dir}/{sample['pdb_id']}_discotope3.pdb"
             if verbose:
-                log.info(f"Writing {sample['pdb_id']} to {outfile}")
+                log.info(
+                    f"Writing {sample['pdb_id']} ({i+1}/{len(dataset)}) to {outfile}"
+                )
             strucio.save_structure(outfile, atom_array)
 
         except Exception as E:
-            log.error(f"Unable to calculate/write predictions PDB: {E}")
+            log.error(
+                f"PDB {sample['pdb_id']} {i+1}/{len(dataset)}: Unable to write predictions PDB: {E}"
+            )
 
 
 def save_predictions_from_dataset(
@@ -488,7 +497,17 @@ def fetch_and_process_from_list_file(list_file, out_dir):
         )
         sys.exit(0)
 
-    for prot_id in pdb_list:
+    for i, prot_id in enumerate(pdb_list):
+
+        if os.path.exists(f"{out_dir}/{prot_id}.pdb"):
+            log.info(
+                f"PDB {i+1}/{len(pdb_list)} ({prot_id}) already present: {out_dir}/{prot_id}.pdb"
+            )
+            continue
+
+        else:
+            log.info(f"Fetching {i+1}/{len(pdb_list)}: {prot_id}")
+
         if args.list_id_type == "uniprot":
             URL = f"https://alphafold.ebi.ac.uk/files/AF-{prot_id}-F1-model_v4.pdb"
             score = None
@@ -512,7 +531,9 @@ def fetch_and_process_from_list_file(list_file, out_dir):
                 f"Request timed out with error code {response.status_code} (url: {URL})."
             )
             log.error(
-                "Try to download the structure(s) locally from the given database and upload as pdb or zip."
+                """Try to download the structure(s) locally from the given database and upload as pdb or zip.
+                Bulk download script: https://www.rcsb.org/docs/programmatic-access/batch-downloads-with-shell-script
+                """
             )
             sys.exit(0)
         else:
@@ -564,6 +585,7 @@ def check_valid_input(args):
         log.error(
             f"Please choose only one of flags: pdb_dir, list_file or pdb_or_zip_file"
         )
+        print(args)
         sys.exit(0)
 
     if args.pdb_dir and args.pdb_or_zip_file:
@@ -595,11 +617,21 @@ def check_valid_input(args):
                 )
                 sys.exit(0)
 
+    # Check XGBoost models present
+    models = glob.glob(f"{args.models_dir}/XGB_*_of_*.json")
+    if len(models) != 100:
+        log.error(f"Only found {len(models)}/100 models in {args.models_dir}")
+        log.error(
+            f"Did you download/unzip the model JSON files (e.g. XGB_1_of_100.json)?"
+        )
+        sys.exit(0)
+
 
 def write_predictions_zip_file(
     predictions_dir: str, out_dir: str, verbose: int = 0
 ) -> str:
-    """Returns filepath for compressed predictions zip stored in out_dir"""
+    """Returns ZIP filepath after compressing predictions zip"""
+
     timestamp = time.strftime("%Y%m%d%H%M")
     outbasename = f"discotope3_{timestamp}"
 
@@ -607,7 +639,7 @@ def write_predictions_zip_file(
         log.info(f"Compressing ZIP file {outbasename}.zip")
 
     shutil.make_archive(
-        f"{outbasename}",
+        f"{out_dir}/{outbasename}",
         "zip",
         root_dir=predictions_dir,
     )
@@ -646,7 +678,7 @@ def check_missing_pdb_csv_files(in_dir, out_dir) -> None:
     # Log which input files are not found in output
     missing_pdbs = in_pdb_dict.keys() - out_dict.keys()
     if len(missing_pdbs) > 0:
-        log.error(f"Error: Failed processing PDBs {''.join(list(missing_pdbs))}")
+        log.error(f"INFO: Failed processing PDBs: {', '.join(list(missing_pdbs))}")
 
 
 def main(args):
@@ -658,12 +690,13 @@ def main(args):
     # Create temporary directory
     with tempfile.TemporaryDirectory() as pdb_or_tempdir:
 
+        pdb_or_tempdir = "../data/download"
+        os.makedirs(pdb_or_tempdir, exist_ok=True)
+
         # 1. Download PDBs from RCSB or AlphaFoldDB
         if args.list_file:
             log.info(f"Fetching PDBs")
-            fetch_and_process_from_list_file(
-                args.list_file, pdb_or_tempdir, pdb_or_tempdir
-            )
+            fetch_and_process_from_list_file(args.list_file, pdb_or_tempdir)
 
         # 2. Unzip if ZIP, else single PDB
         if args.pdb_or_zip_file:
@@ -688,7 +721,7 @@ def main(args):
 
         # Predict and save
         log.info(f"Loading XGBoost ensemble")
-        models = load_models(args.models_dir, num_models=2)  # MH
+        models = load_models(args.models_dir, num_models=100)  # MH
 
         log.info(f"Writing prediction .csv and .pdb files")
         write_model_prediction_csvs_pdbs(
@@ -706,6 +739,9 @@ def main(args):
         # Check which files failed
         check_missing_pdb_csv_files(pdb_or_tempdir, args.out_dir)
         log.info(f"Done!")
+        import pdb
+
+        pdb.set_trace()
         asd
 
         # HTML printing
@@ -756,6 +792,7 @@ def main(args):
 if __name__ == "__main__":
 
     args = cmdline_args()
+    os.makedirs(args.out_dir, exist_ok=True)
     logging.basicConfig(
         filename=f"{args.out_dir}/dt3.log",
         encoding="utf-8",
@@ -766,12 +803,10 @@ if __name__ == "__main__":
     )
     log = logging.getLogger(__name__)
     log.info("Predicting PDBs using Discotope-3.0")
-    os.makedirs(args.out_dir, exist_ok=True)
-    os.makedirs(args.pdb_dir, exist_ok=True)
 
     try:
         main(args)
     except Exception as E:
         log.exception(
-            "Prediction encountered an unexpected error. This is likely a bug in the server software."
+            "Prediction encountered an unexpected error. This is likely a bug in the server software: {E}"
         )
