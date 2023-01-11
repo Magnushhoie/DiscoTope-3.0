@@ -145,6 +145,10 @@ def load_IF1_tensors(
 
         _pdb = get_basename_no_ext(pdb_path)
 
+        # structure = esm.inverse_folding.util.load_structure()
+        structure, structure_full = load_structure_discotope(str(pdb_path), chain=None)
+        coords, seq = esm.inverse_folding.util.extract_coords_from_structure(structure)
+
         # Load if already exists
         embed_file = re.sub(r".pdb$", ".pt", pdb_path)
         if check_existing and os.path.exists(embed_file):
@@ -156,20 +160,11 @@ def load_IF1_tensors(
         # Else, embed
         else:
             log.info(f"{i+1} / {len(pdb_files)}: Embedding {_pdb}")
-            # structure = esm.inverse_folding.util.load_structure()
-            structure, structure_full = load_structure_discotope(
-                str(pdb_path), chain=None
-            )
-            coords, seq = esm.inverse_folding.util.extract_coords_from_structure(
-                structure
-            )
 
             # Embed on CPU if PDB is too large
-            if len(seq) >= 1000:
-                device = "cpu"
-            else:
-                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+            device = torch.device(
+                "cuda" if torch.cuda.is_available() and len(seq) < 1000 else "cpu"
+            )
             rep = (
                 src.esm_util_custom.get_encoder_output(
                     model, alphabet, coords, seq, device=device
@@ -179,6 +174,7 @@ def load_IF1_tensors(
             )
 
             if save_embeddings:
+                log.info(f"Saving {embed_file}")
                 torch.save(rep, embed_file)
 
         list_IF1_tensors.append(rep)
@@ -542,8 +538,8 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
                 self.list_sequences,
             ) = load_IF1_tensors(
                 self.list_pdb_files,
-                check_existing=args.check_existing,
-                save_embeddings=args.save_existing,
+                check_existing=self.check_existing,
+                save_embeddings=self.save_embeddings,
             )
 
             # Remaining pre-processing
@@ -552,9 +548,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
             )
 
             # Filter out failed samples
-            print(f"Before filter: {len(self.preprocessed_dataset)}")
             self.preprocessed_dataset = [d for d in self.preprocessed_dataset if d]
-            print(f"After filter: {len(self.preprocessed_dataset)}")
 
         else:
             self.preprocessed_dataset = []

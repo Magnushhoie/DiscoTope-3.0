@@ -221,12 +221,11 @@ def write_model_prediction_csvs_pdbs(
         try:
             # Predict on antigen features
             y_hat = predict_using_models(models, sample["X_arr"])
-            sample["y_hat"] = y_hat
-            # sample["df_stats"].insert(4, "DiscoTope-3.0_score", y_hat)
+            sample["y_hat"] = y_hat * 100
 
             # Output CSV
             df_out = sample["df_stats"]
-            df_out.insert(4, "DiscoTope-3.0_score", y_hat)
+            df_out.insert(3, "DiscoTope-3.0_score", y_hat)
 
             # Round to 5 digits
             num_cols = ["DiscoTope-3.0_score", "rsa"]
@@ -238,7 +237,7 @@ def write_model_prediction_csvs_pdbs(
                 log.info(
                     f"Writing {sample['pdb_id']} ({i+1}/{len(dataset)}) to {outfile}"
                 )
-            df_out.to_csv(outfile)
+            df_out.to_csv(outfile, index=False)
 
         except Exception as E:
             log.error(
@@ -718,6 +717,9 @@ def main(args):
         dataset = Discotope_Dataset_web(
             pdb_or_tempdir, structure_type=args.struc_type, verbose=args.verbose
         )
+        if len(dataset) == 0:
+            log.error("Error: No files in dataset.")
+            sys.exit(0)
 
         # Predict and save
         log.info(f"Loading XGBoost ensemble")
@@ -732,9 +734,9 @@ def main(args):
         log.info(f"Writing predictions CSV file")
         # temp_id = "/".join(args.out_dir.rsplit("/", 2)[1:])
         # job_out_dir = f"/services/DiscoTope-3.0/tmp/{temp_id}"
-        out_zip = write_predictions_zip_file(
-            predictions_dir=pdb_or_tempdir, out_dir=args.out_dir, verbose=args.verbose
-        )
+        # out_zip = write_predictions_zip_file(
+        #    predictions_dir=args.out_dir, out_dir=args.out_dir, verbose=args.verbose
+        # )
 
         # Check which files failed
         check_missing_pdb_csv_files(pdb_or_tempdir, args.out_dir)
