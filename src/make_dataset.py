@@ -7,6 +7,7 @@ log = logging.getLogger(__name__)
 import os
 import re
 import sys
+import traceback
 # Set project path two levels up
 from pathlib import Path
 from typing import List
@@ -141,37 +142,48 @@ def load_IF1_tensors(
 
         _pdb = get_basename_no_ext(pdb_path)
 
-        # structure = esm.inverse_folding.util.load_structure()
-        structure, structure_full = load_structure_discotope(str(pdb_path), chain=None)
-        coords, seq = esm.inverse_folding.util.extract_coords_from_structure(structure)
-
-        # Load if already exists
-        embed_file = re.sub(r".pdb$", ".pt", pdb_path)
-        if check_existing and os.path.exists(embed_file):
-            log.info(
-                f"{i+1} / {len(pdb_files)}: Loading existing embedding file for {_pdb}: {embed_file}"
+        try:
+            # structure = esm.inverse_folding.util.load_structure()
+            structure, structure_full = load_structure_discotope(
+                str(pdb_path), chain=None
             )
-            rep = torch.load(embed_file)
-
-        # Else, embed
-        else:
-            log.info(f"{i+1} / {len(pdb_files)}: Embedding {_pdb}")
-
-            # Embed on CPU if PDB is too large
-            device = torch.device(
-                "cuda" if torch.cuda.is_available() and len(seq) < 1000 else "cpu"
+            coords, seq = esm.inverse_folding.util.extract_coords_from_structure(
+                structure
             )
-            rep = (
-                esm_util_custom.get_encoder_output(
-                    model, alphabet, coords, seq, device=device
+
+            # Load if already exists
+            embed_file = re.sub(r".pdb$", ".pt", pdb_path)
+            if check_existing and os.path.exists(embed_file):
+                log.info(
+                    f"{i+1} / {len(pdb_files)}: Loading existing embedding file for {_pdb}: {embed_file}"
                 )
-                .detach()
-                .cpu()
-            )
+                rep = torch.load(embed_file)
 
-            if save_embeddings:
-                log.info(f"Saving {embed_file}")
-                torch.save(rep, embed_file)
+            # Else, embed
+            else:
+                log.info(f"{i+1} / {len(pdb_files)}: Embedding {_pdb}")
+
+                # Embed on CPU if PDB is too large
+                device = torch.device(
+                    "cuda" if torch.cuda.is_available() and len(seq) < 1000 else "cpu"
+                )
+                rep = (
+                    esm_util_custom.get_encoder_output(
+                        model, alphabet, coords, seq, device=device
+                    )
+                    .detach()
+                    .cpu()
+                )
+
+                if save_embeddings:
+                    log.info(f"Saving {embed_file}")
+                    torch.save(rep, embed_file)
+
+        except Exception as E:
+            log.error(f"Unable to embed {_pdb}: {E}")
+            list_IF1_tensors.append(False)
+            list_structures.append(False)
+            list_sequences.append(False)
 
         list_IF1_tensors.append(rep)
         list_structures.append(structure_full)
@@ -582,6 +594,12 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
             L = len(seq)
             lengths = np.array([L] * L)
 
+            if type(IF1_tensor) == bool or type(struc_full) == bool:
+                log.error(
+                    f"Failed to read embedding / structure / sequence from {pdb_id}"
+                )
+                return False
+
             # Extract values from PDB
             (
                 pdb_seq,
@@ -652,8 +670,6 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
 
         except Exception as E:
             log.error(f"Error processing PDB id {pdb_id}, from {pdb_fp}: {E}")
-            import traceback
-
             traceback.print_exc()
             return False
 

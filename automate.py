@@ -3,7 +3,7 @@ import os
 import subprocess
 import textwrap
 
-dir = "."
+dir = "src/"
 verbose = "--verbose 2"
 
 
@@ -16,8 +16,8 @@ def selected(choice, opt1, opt2):
     return choice in [opt1, opt2]
 
 
-def run_bash(bashCommand, print_out=True, timeout=10):
-    output = subprocess.run(bashCommand, timeout=10, capture_output=True, shell=True)
+def run_bash(bashCommand, print_out=True, timeout=20):
+    output = subprocess.run(bashCommand, timeout=timeout, capture_output=True, shell=True)
     if print_out:
         print(output.stdout.decode("utf-8"))
 
@@ -31,7 +31,8 @@ while True:
         1) predict full (solved)
         2) predict chains (solved)
         3) predict chains (alphafold)
-        4) Predict list file
+        4) predict list file
+        5) predict single PDB (fetch)
         """
     )
 
@@ -84,6 +85,23 @@ while True:
         --list_id rcsb --struc_type solved \
         --out_dir job_out/test_full \
         {verbose} 
+        """
+        )
+
+    if selected(choice, "5", "predict single PDB (fetch)"):
+        pdb_id = input("Enter PDB ID: ")
+        with (open(f"data/{pdb_id}.txt", "w")) as f:
+            f.write(pdb_id)
+
+        struc_type = input("Enter PDB type (alphafold or rcsb): ")
+
+        msg(
+            rf"""
+        python src/predict_webserver.py \
+        --list_file data/{pdb_id}.txt \
+        --list_id rcsb --struc_type {struc_type} \
+        --out_dir job_out/{pdb_id} \
+        {verbose}
         """
         )
 
