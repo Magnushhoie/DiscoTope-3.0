@@ -35,7 +35,7 @@ from argparse import ArgumentParser, RawTextHelpFormatter
 from Bio.Data.PDBData import residue_sasa_scales
 from Bio.SeqUtils import seq1
 
-import src.esm_util_custom
+import esm_util_custom
 
 # Sander or Wilke
 # residue_max_acc_1seq = {seq1(aa) : residue_sasa_scales["Sander"][aa] for aa, val in residue_sasa_scales["Sander"].items()}
@@ -166,7 +166,7 @@ def load_IF1_tensors(
                 "cuda" if torch.cuda.is_available() and len(seq) < 1000 else "cpu"
             )
             rep = (
-                src.esm_util_custom.get_encoder_output(
+                esm_util_custom.get_encoder_output(
                     model, alphabet, coords, seq, device=device
                 )
                 .detach()
@@ -375,7 +375,7 @@ def embed_pdbs_IF1(
                     str(pdb_path), chain_id
                 )
 
-            coords, seq = src.esm_util_custom.extract_coords_from_structure(structure)
+            coords, seq = esm_util_custom.extract_coords_from_structure(structure)
 
             # Extra
             # seq_idxs = np.unique(structure.res_id)
@@ -395,7 +395,7 @@ def embed_pdbs_IF1(
             # Save representation to file
             log.info(f"ESM-IF1: Not including confidence")
             confidence = None
-            rep = src.esm_util_custom.get_encoder_output(
+            rep = esm_util_custom.get_encoder_output(
                 model, alphabet, coords, confidence, seq, device
             )
             torch.save(rep, outpath)
