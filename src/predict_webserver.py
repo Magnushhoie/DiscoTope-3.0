@@ -5,6 +5,7 @@ MAX_FILES = 50
 MAX_FILE_SIZE_MB = 30
 
 import logging
+import subprocess
 
 logging.basicConfig(level=logging.INFO, format="[{asctime}] {message}", style="{")
 log = logging.getLogger(__name__)
@@ -25,11 +26,7 @@ from zipfile import ZipFile
 import biotite
 import biotite.structure.io as strucio
 import numpy as np
-import pandas as pd
-import prody  # MH can rewrite with Biotite?
 import xgboost as xgb
-# from Bio import SeqIO
-from sklearn import metrics
 
 ROOT_PATH = str(os.path.dirname(os.getcwd()))
 
@@ -138,18 +135,6 @@ python src/predict_webserver.py \
     return p.parse_args()
 
 
-def get_percentile_score(
-    df: pd.DataFrame,
-    col: str,
-):
-    """Find mean predicted epitope rank percentile score"""
-    epitopes = df["epitope"].astype(bool)
-    c = df[col][epitopes].mean()
-    c_percentile = (c > df[col]).mean()
-
-    return c_percentile, c
-
-
 def load_models(
     models_dir: str,
     num_models: int = 100,
@@ -204,12 +189,6 @@ def predict_using_models(
 
     y_hat = y_hat / len(models)
     return y_hat
-
-
-def get_auc(y_true, y_pred, sig_dig=5):
-    """Returns AUC"""
-    auc = np.round(metrics.roc_auc_score(y_true, y_pred), sig_dig)
-    return auc
 
 
 def write_model_prediction_csvs_pdbs(
@@ -271,154 +250,6 @@ def write_model_prediction_csvs_pdbs(
             log.error(
                 f"PDB {sample['pdb_id']} {i+1}/{len(dataset)}: Unable to write predictions PDB: {E}"
             )
-
-
-def save_predictions_from_dataset(
-    dataset: Discotope_Dataset_web,
-    models: List["xgb.XGBClassifier"],
-    out_dir: str,
-    verbose: int = 0,
-) -> None:
-    """Loads models, predicts on dataset and saves to out_dir"""
-
-    def prody_set_bfactor(
-        struc: prody.atomic.atomgroup.AtomGroup,
-        res_bfactors: np.array,
-    ):
-
-        # Set pLDDTs by residue indices
-        idxs = struc.getResindices()
-        struc.setBetas(res_bfactors[idxs])
-
-        return struc
-
-    dfs_list = []
-    for i, sample in enumerate(dataset):
-
-        # Predict on antigen features
-        y_hat = predict_using_models(models, sample["X_arr"])
-
-        # Add predictions to antigen dataframe
-        df_pdb = sample["df_stats"].copy()
-        df_pdb.insert(loc=3, column="Discotope-3.0_score", value=y_hat)
-
-        # Write CSV and append to list
-        outfile = f"{out_dir}/{sample['pdb_id']}.csv"
-        log.info(
-            f"{i+1} / {len(dataset)}: Saving predictions for {sample['pdb_id']} ({len(y_hat)} residues) to {outfile}"
-        )
-        df_pdb.to_csv(outfile, index=False)
-        dfs_list.append(df_pdb)
-
-        log.info(f"Saving PDBs")
-
-        # Write output PDBs with B-factors set to predictions
-        struc = prody.parsePDB(sample["pdb_fp"])
-
-        values = y_hat
-
-        try:
-            bfacs = ((values - values.min()) / (values.max() - values.min())) * 100
-            struc = prody_set_bfactor(struc, bfacs)
-            prody.writePDB(f"{out_dir}/{sample['pdb_id']}_{label}.pdb", struc)
-            p = PDBParser(PERMISSIVE=1)
-            structure = p.get_structure(
-                f"{sample['pdb_id']}_{label}",
-                f"{out_dir}/{sample['pdb_id']}_{label}.pdb",
-            )
-            io = MMCIFIO()
-            io.set_structure(structure)
-            io.save(f"{out_dir}/{sample['pdb_id']}_{label}.tmp.cif", Clean_Chain(bfacs))
-            with open(
-                f"{out_dir}/{sample['pdb_id']}_{label}.tmp.cif", "r"
-            ) as infile, open(
-                f"{out_dir}/{sample['pdb_id']}_{label}.cif", "w"
-            ) as outfile:
-                outfile.write(infile.readline())
-                print(
-                    "#",
-                    "loop_",
-                    "_ma_qa_metric.id",
-                    "_ma_qa_metric.mode",
-                    "_ma_qa_metric.name",
-                    "_ma_qa_metric.software_group_id",
-                    "_ma_qa_metric.type",
-                    "1 global pLDDT 1 pLDDT",
-                    "2 local  pLDDT 1 pLDDT",
-                    sep="\n",
-                    file=outfile,
-                )
-                print(
-                    "#",
-                    "loop_",
-                    "_ma_qa_metric_local.label_asym_id",
-                    "_ma_qa_metric_local.label_comp_id",
-                    "_ma_qa_metric_local.label_seq_id",
-                    "_ma_qa_metric_local.metric_id",
-                    "_ma_qa_metric_local.metric_value",
-                    "_ma_qa_metric_local.model_id",
-                    "_ma_qa_metric_local.ordinal_id",
-                    sep="\n",
-                    file=outfile,
-                )
-
-                info_header = list()
-                for i in range(20):
-                    info_header.append(infile.readline().strip())
-
-                atoms_cif = [x.strip() for x in infile.readlines()][:-1]
-                previous_resid = None
-
-                for entry in atoms_cif:
-                    if previous_resid is None or previous_resid != int(entry[26:30]):
-                        qa_metric = [" " for _ in range(24)]
-                        auth_id = entry.split()[15]
-                        # qa_metric[20:20+len(auth_id)] = auth_id
-                        qa_metric[-4:] = entry[26:30]
-                        qa_metric[0] = entry[22]
-                        qa_metric[2:5] = entry[18:21]
-                        qa_metric[6 : 6 + len(auth_id)] = auth_id
-                        # qa_metric[6:10] = entry[26:30]
-                        qa_metric[10] = "2"
-                        qa_metric[12:17] = "{:.6f}".format(float(entry.split()[14]))[:5]
-                        qa_metric[18] = "1"
-                        previous_resid = int(entry[26:30])
-                        print("".join(qa_metric), file=outfile)
-
-                for info in info_header:
-                    print(info, file=outfile)
-                for entry in atoms_cif:
-                    print(entry, file=outfile)
-                print("#", file=outfile)
-
-        except Exception as E:
-            log.error(f"Unable to write prediction PDB: {E}")
-
-    # Merge and calculate performance
-    df_all = pd.concat(dfs_list, ignore_index=False)
-
-    # y_true = df_all["residue"].apply(lambda x: str(x).isupper())
-    y_hat = df_all["Discotope-3.0_score"]
-    # log.info(f"Merged, AUC {get_auc(y_true, y_hat):.5f}")
-
-    return df_all
-
-
-def merge_prediction_csvs(csv_dir: str, outfile: str):
-    """Merge discotope CSV files to single and save to outdir"""
-
-    # Discotope
-    # csv_dir = "../webserver/data/dt3"
-    csv_files = list(Path(csv_dir).glob("*.csv"))
-    log.info(f"DT3 to DT3: Found {len(csv_files)} CSV files in {csv_dir}")
-
-    # Combine and save
-    dt3_df_list = [pd.read_csv(csv_file) for csv_file in csv_files]
-    df_dt3 = pd.concat(dt3_df_list, ignore_index=False)
-    df_dt3.reset_index(drop=True)
-
-    log.info(f"Saving Discotope-3.0 merged CSV to {outfile}")
-    df_dt3.to_csv(outfile, index=False)
 
 
 class Clean_Chain(Select):
@@ -698,26 +529,6 @@ def check_valid_input(args):
         sys.exit(0)
 
 
-def write_predictions_zip_file(
-    predictions_dir: str, out_dir: str, verbose: int = 0
-) -> str:
-    """Returns ZIP filepath after compressing predictions zip"""
-
-    timestamp = time.strftime("%Y%m%d%H%M")
-    outbasename = f"discotope3_{timestamp}"
-
-    if args.verbose:
-        log.info(f"Compressing ZIP file {outbasename}.zip")
-
-    shutil.make_archive(
-        f"{out_dir}/{outbasename}",
-        "zip",
-        root_dir=predictions_dir,
-    )
-
-    return f"{outbasename}.zip"
-
-
 def get_basename_no_ext(filepath):
     """
     Returns file basename excluding extension,
@@ -750,6 +561,24 @@ def check_missing_pdb_csv_files(in_dir, out_dir) -> None:
     missing_pdbs = in_pdb_dict.keys() - out_dict.keys()
     if len(missing_pdbs) > 0:
         log.error(f"INFO: Failed processing PDBs: {', '.join(list(missing_pdbs))}")
+
+
+def zip_folder_timeout(in_dir, out_dir) -> str:
+    """Zips in_dir, writes to out_dir, returns zip file"""
+
+    timestamp = time.strftime("%Y%m%d%H%M")
+    zip_path = f"{out_dir}/discotope3_{timestamp}.zip"
+    bashCommand = f"zip {zip_path} {in_dir}/*.pdb {in_dir}/*.csv || exit"
+
+    try:
+        output = subprocess.run(
+            bashCommand, timeout=20, capture_output=True, shell=True
+        )
+        log.info(output.stdout.decode())
+        return zip_path
+    except subprocess.TimeoutExpired:
+        log.error("Error: zip compression timed out")
+        sys.exit(0)
 
 
 def main(args):
@@ -803,12 +632,8 @@ def main(args):
         )
 
         # Zip output folder
-        log.info(f"Writing predictions CSV file")
-
-        # job_out_dir = f"/services/DiscoTope-3.0/tmp/{temp_id}"
-        # out_zip = write_predictions_zip_file(
-        #    predictions_dir=args.out_dir, out_dir=args.out_dir, verbose=args.verbose
-        # )
+        log.info(f"Compressing ZIP file")
+        out_zip = zip_folder_timeout(in_dir=args.out_dir, out_dir=args.out_dir)
 
         # Check which files failed
         check_missing_pdb_csv_files(pdb_or_tempdir, f"{args.out_dir}/output")
@@ -817,9 +642,9 @@ def main(args):
         # HTML printing
         examples = """<script type="text/javascript">const examples = ["""
         print("<h2>Output download</h2>")
-        # print(
-        #    f'<a href="{out_zip}"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
-        # )
+        print(
+            f'<a href="{out_zip}"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
+        )
 
         print(
             """<div class="wrap-collabsible">
@@ -873,5 +698,5 @@ if __name__ == "__main__":
         main(args)
     except Exception as E:
         log.exception(
-            "Prediction encountered an unexpected error. This is likely a bug in the server software: {E}"
+            f"Prediction encountered an unexpected error. This is likely a bug in the server software: {E}"
         )
