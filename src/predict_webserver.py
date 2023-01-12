@@ -92,7 +92,7 @@ python src/predict_webserver.py \
 
     p.add_argument(
         "--struc_type",
-        required=False, # Only needed for file input, not list
+        required=False,  # Only needed for file input, not list
         help="Structure type from file (solved | alphafold)",
     )
 
@@ -215,7 +215,7 @@ def get_auc(y_true, y_pred, sig_dig=5):
 def write_model_prediction_csvs_pdbs(
     models, dataset, out_dir, verbose: int = 0
 ) -> None:
-    """Calculates predictions for dataset PDBs, saves output .csv and .pdb file"""
+    """Calculates predictions for dataset PDBs, saves output .csv and .pdb + .cif files"""
 
     for i, sample in enumerate(dataset):
         try:
@@ -244,31 +244,34 @@ def write_model_prediction_csvs_pdbs(
                 f"PDB {sample['pdb_id']} {i+1}/{len(dataset)}: Unable to write predictions CSV: {E}"
             )
 
-        #try:
-        # Set B-factor field to DiscoTope-3.0 score
-        atom_array = sample["PDB_biotite"]
-        values = sample["y_hat"]
-        target_values = ((values - values.min()) / (values.max() - values.min())) * 100
-        atom_array = biotite.structure.renumber_res_ids(
-            atom_array, start=1
-        )  # Unnecessary, already done in pre-processing
-        atom_array.b_factor = target_values[atom_array.res_id - 1]
+        try:
+            # Set B-factor field to DiscoTope-3.0 score
+            atom_array = sample["PDB_biotite"]
+            values = sample["y_hat"]
+            # target_values = ((values - values.min()) / (values.max() - values.min())) * 100
 
-        # Write PDB
-        outfile = f"{out_dir}/{sample['pdb_id']}_discotope3.pdb"
-        if verbose:
-            log.info(
-                f"Writing {sample['pdb_id']} ({i+1}/{len(dataset)}) to {outfile}"
+            # Get relative indices starting from 1
+            atom_array_renum = biotite.structure.renumber_res_ids(atom_array, start=1)
+            atom_array.b_factor = values[atom_array_renum.res_id - 1]
+
+            # Write PDB
+            outfile = f"{out_dir}/{sample['pdb_id']}_discotope3.pdb"
+            if verbose:
+                log.info(
+                    f"Writing {sample['pdb_id']} ({i+1}/{len(dataset)}) to {outfile}"
+                )
+            strucio.save_structure(outfile, atom_array)
+            make_visualisation_cif(
+                outfile,
+                f"{out_dir}/{sample['pdb_id']}_discotope3.tmp.cif",
+                f"{out_dir}/{sample['pdb_id']}_discotope3.cif",
             )
-        strucio.save_structure(outfile, atom_array)
-        make_visualisation_cif(outfile, 
-                            f"{out_dir}/{sample['pdb_id']}_discotope3.tmp.cif",
-                            f"{out_dir}/{sample['pdb_id']}_discotope3.cif")
 
-        #except Exception as E:
-        #    log.error(
-        #        f"PDB {sample['pdb_id']} {i+1}/{len(dataset)}: Unable to write predictions PDB: {E}"
-        #    )
+        except Exception as E:
+            log.error(
+                f"PDB {sample['pdb_id']} {i+1}/{len(dataset)}: Unable to write predictions PDB: {E}"
+            )
+
 
 def save_predictions_from_dataset(
     dataset: Discotope_Dataset_web,
@@ -465,7 +468,11 @@ class Clean_Chain(Select):
             atom.set_bfactor(self.score[res_id - self.init_resid])
         return True
 
-def make_visualisation_cif(in_pdb_path, out_tmp_cif_path, out_cif_path):
+
+def make_visualisation_cif(in_pdb_path: str, out_tmp_cif_path: str, out_cif_path: str):
+    """
+    Make a CIF file with B-factors for visualisation
+    """
     p = PDBParser(PERMISSIVE=True)
 
     structure = p.get_structure("Name", in_pdb_path)
@@ -475,12 +482,32 @@ def make_visualisation_cif(in_pdb_path, out_tmp_cif_path, out_cif_path):
 
     with open(out_tmp_cif_path, "r") as infile, open(out_cif_path, "w") as outfile:
         outfile.write(infile.readline())
-        print("#", "loop_", "_ma_qa_metric.id", "_ma_qa_metric.mode", "_ma_qa_metric.name",
-            "_ma_qa_metric.software_group_id", "_ma_qa_metric.type", "1 global pLDDT 1 pLDDT", 
-            "2 local  pLDDT 1 pLDDT", sep="\n", file=outfile)
-        print("#", "loop_", "_ma_qa_metric_local.label_asym_id", "_ma_qa_metric_local.label_comp_id", 
-            "_ma_qa_metric_local.label_seq_id", "_ma_qa_metric_local.metric_id", "_ma_qa_metric_local.metric_value",
-            "_ma_qa_metric_local.model_id", "_ma_qa_metric_local.ordinal_id", sep="\n", file=outfile)
+        print(
+            "#",
+            "loop_",
+            "_ma_qa_metric.id",
+            "_ma_qa_metric.mode",
+            "_ma_qa_metric.name",
+            "_ma_qa_metric.software_group_id",
+            "_ma_qa_metric.type",
+            "1 global pLDDT 1 pLDDT",
+            "2 local  pLDDT 1 pLDDT",
+            sep="\n",
+            file=outfile,
+        )
+        print(
+            "#",
+            "loop_",
+            "_ma_qa_metric_local.label_asym_id",
+            "_ma_qa_metric_local.label_comp_id",
+            "_ma_qa_metric_local.label_seq_id",
+            "_ma_qa_metric_local.metric_id",
+            "_ma_qa_metric_local.metric_value",
+            "_ma_qa_metric_local.model_id",
+            "_ma_qa_metric_local.ordinal_id",
+            sep="\n",
+            file=outfile,
+        )
 
         info_header = list()
         for i in range(20):
@@ -493,14 +520,14 @@ def make_visualisation_cif(in_pdb_path, out_tmp_cif_path, out_cif_path):
             if previous_resid is None or previous_resid != int(entry[26:30]):
                 qa_metric = [" " for _ in range(24)]
                 auth_id = entry.split()[15]
-                #qa_metric[20:20+len(auth_id)] = auth_id
+                # qa_metric[20:20+len(auth_id)] = auth_id
                 qa_metric[-4:] = entry[26:30]
                 qa_metric[0] = entry[22]
                 qa_metric[2:5] = entry[18:21]
-                qa_metric[6:6+len(auth_id)] = auth_id
-                #qa_metric[6:10] = entry[26:30]
+                qa_metric[6 : 6 + len(auth_id)] = auth_id
+                # qa_metric[6:10] = entry[26:30]
                 qa_metric[10] = "2"
-                qa_metric[12:17] = '{:.6f}'.format(float(entry.split()[14]))[:5]
+                qa_metric[12:17] = "{:.6f}".format(float(entry.split()[14]))[:5]
                 qa_metric[18] = "1"
                 previous_resid = int(entry[26:30])
                 print("".join(qa_metric), file=outfile)
@@ -510,6 +537,7 @@ def make_visualisation_cif(in_pdb_path, out_tmp_cif_path, out_cif_path):
         for entry in atoms_cif:
             print(entry, file=outfile)
         print("#", file=outfile)
+
 
 def save_pdb(pdb_name, pdb_path, out_prefix, score):
 
@@ -771,31 +799,27 @@ def main(args):
 
         log.info(f"Writing prediction .csv and .pdb files")
         write_model_prediction_csvs_pdbs(
-            models, dataset, out_dir=f'{args.out_dir}/output', verbose=args.verbose
+            models, dataset, out_dir=f"{args.out_dir}/output", verbose=args.verbose
         )
 
         # Zip output folder
         log.info(f"Writing predictions CSV file")
-        
+
         # job_out_dir = f"/services/DiscoTope-3.0/tmp/{temp_id}"
         # out_zip = write_predictions_zip_file(
         #    predictions_dir=args.out_dir, out_dir=args.out_dir, verbose=args.verbose
         # )
 
         # Check which files failed
-        check_missing_pdb_csv_files(pdb_or_tempdir, f'{args.out_dir}/output')
+        check_missing_pdb_csv_files(pdb_or_tempdir, f"{args.out_dir}/output")
         log.info(f"Done!")
-        #import pdb
-
-        #pdb.set_trace()
-        #asd
 
         # HTML printing
         examples = """<script type="text/javascript">const examples = ["""
         print("<h2>Output download</h2>")
-        #print(
+        # print(
         #    f'<a href="{out_zip}"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
-        #)
+        # )
 
         print(
             """<div class="wrap-collabsible">
@@ -806,7 +830,7 @@ def main(args):
             """
         )
 
-        temp_id = "/".join(f'{args.out_dir}/output'.rsplit("/", 2)[1:])
+        temp_id = "/".join(f"{args.out_dir}/output".rsplit("/", 2)[1:])
 
         for i, sample in enumerate(dataset):
             outpdb = f"{temp_id}/{sample['pdb_id']}_discotope3.pdb"
@@ -818,9 +842,7 @@ def main(args):
             examples += "},"
 
             style = ' style="margin-top:2em;"' if i > 0 else ""
-            print(
-                f"<h3{style}>{sample['pdb_id']}</h3>"
-            )
+            print(f"<h3{style}>{sample['pdb_id']}</h3>")
             print(
                 f'<a href="/services/DiscoTope-3.0/tmp/{outpdb}"><p>Download PDB w/ DiscoTope-3.0 prediction scores</p></a>'
             )
@@ -836,7 +858,7 @@ def main(args):
 if __name__ == "__main__":
 
     args = cmdline_args()
-    os.makedirs(f'{args.out_dir}/output', exist_ok=True)
+    os.makedirs(f"{args.out_dir}/output", exist_ok=True)
     logging.basicConfig(
         filename=f"{args.out_dir}/output/dt3.log",
         encoding="utf-8",

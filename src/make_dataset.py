@@ -37,10 +37,6 @@ from Bio.SeqUtils import seq1
 
 import esm_util_custom
 
-# Sander or Wilke
-# residue_max_acc_1seq = {seq1(aa) : residue_sasa_scales["Sander"][aa] for aa, val in residue_sasa_scales["Sander"].items()}
-# sasa_max_dict = residue_max_acc_1seq
-
 residue_max_acc_1seq = {
     seq1(aa): residue_sasa_scales["Sander"][aa]
     for aa, val in residue_sasa_scales["Sander"].items()
@@ -128,7 +124,7 @@ def load_IF1_tensors(
     save_embeddings=True,
     verbose: int = 1,
 ) -> List:
-    """Embeds PDBs using IF1, returns list"""
+    """Generate or load ESM-IF1 embeddings for a list of PDB files"""
 
     import esm
     import esm.inverse_folding
@@ -344,10 +340,6 @@ def embed_pdbs_IF1(
         pdb = os.path.splitext(os.path.basename(pdb_path))[0]
         outpath = f"{out_dir}/{pdb}.pt"
 
-        # if pdb not in input_fasta:
-        #    print(f"Skipping {pdb}, not in input_fasta")
-        #    continue
-
         if os.path.exists(outpath) and not overwrite_embeddings:
             if verbose:
                 exist_count += 1
@@ -356,13 +348,6 @@ def embed_pdbs_IF1(
         else:
             log.info(f"{i+1} / {len(pdb_paths)}: Embedding {pdb_path} using ESM-IF1")
 
-            # MH: Better system for choosing chains needed
-            # Extract chain from last character after "_"
-            # chain_id = "A"
-            # chain_id = pdb.split("_")[1][0]
-
-            # if struc_type != "solved":
-            # chain_id = None
             chain_id = None
 
             # Extract representation
@@ -376,13 +361,6 @@ def embed_pdbs_IF1(
                 )
 
             coords, seq = esm_util_custom.extract_coords_from_structure(structure)
-
-            # Extra
-            # seq_idxs = np.unique(structure.res_id)
-            # if struc_type == "alphafold" and not exclude_conf:
-            #    log.info(f"Including pLDDTs in IF1 embedding")
-            #    confidence = get_atomarray_bfacs(structure)
-            # else:
 
             if verbose:
                 log.info(f"PDB {pdb}, IF1: {len(seq)} residues")
@@ -405,8 +383,10 @@ def embed_pdbs_IF1(
     )
 
 
-def get_atomarray_seq_residx(atom_array):
-    """Return sequence and residue indices"""
+def get_atomarray_seq_residx(
+    atom_array: biotite.structure.AtomArray,
+) -> tuple[str, np.ndarray]:
+    """Returns sequence and residue indices for an atom array"""
 
     res_idxs, res_names = get_residues(atom_array)
     seq = "".join([ProteinSequence.convert_letter_3to1(r) for r in res_names])
@@ -431,12 +411,13 @@ def get_atomarray_bfacs(atom_array: biotite.structure.AtomArray) -> np.array:
     Return per-residue B-factors (AF2 confidence) from biotite.structure.AtomArray
     """
 
-    # Extract B-factors
-    res_idxs_dict = {r: i for i, r in enumerate(atom_array.res_id)}
-    res_idxs_uniq = np.array(list(res_idxs_dict.values()))
+    # Temporary renumber for relative indices starting from 1
+    atom_array_renum = biotite.structure.renumber_res_ids(atom_array, start=1)
 
-    # Assign to series with assigned residue indices
-    res_bfacs = atom_array.b_factor[res_idxs_uniq]
+    # Extract B-factors, map to residues
+    res_idxs_dict = {r: i for i, r in enumerate(atom_array_renum.res_id)}
+    res_idxs_uniq = np.array(list(res_idxs_dict.values()))
+    res_bfacs = atom_array_renum.b_factor[res_idxs_uniq]
 
     return res_bfacs
 
@@ -456,8 +437,6 @@ def structure_extract_seq_residx_bfac_rsas_diam(struc_full, chain_id):
     # structure = pdbf.get_structure(model=1, extra_fields=["b_factor"])
     # _, struc_full = load_structure_discotope(pdb_path, chain_id)
 
-    # Renumber
-    struc_full = biotite.structure.renumber_res_ids(struc_full, start=1)
     seq, res_idxs = get_atomarray_seq_residx(struc_full)
     bfacs = get_atomarray_bfacs(struc_full)
 
@@ -693,14 +672,8 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
 def main(args):
     """Main function"""
 
-    # If models directory not changed from default, assign as basename of out_dir
-    # if args.models_path == f"{ROOT_PATH}/models/":
-    #    args.models_path = f"{ROOT_PATH}/models/{os.path.basename(args.out_dir)}"
-    #    log.info(f"Will save trained models to {args.models_path}")
-
     # Make sure output directories exist
     os.makedirs(args.out_dir, exist_ok=True)
-    # os.makedirs(args.models_path, exist_ok=True)
 
     if args.fasta:
         if os.path.exists(args.fasta):
