@@ -6,6 +6,7 @@ MAX_FILE_SIZE_MB = 30
 
 import logging
 import subprocess
+import traceback
 
 logging.basicConfig(level=logging.INFO, format="[{asctime}] {message}", style="{")
 log = logging.getLogger(__name__)
@@ -222,6 +223,7 @@ def write_model_prediction_csvs_pdbs(
             log.error(
                 f"PDB {sample['pdb_id']} {i+1}/{len(dataset)}: Unable to write predictions CSV: {E}"
             )
+            traceback.print_exc()
 
         try:
             # Set B-factor field to DiscoTope-3.0 score
@@ -250,6 +252,7 @@ def write_model_prediction_csvs_pdbs(
             log.error(
                 f"PDB {sample['pdb_id']} {i+1}/{len(dataset)}: Unable to write predictions PDB: {E}"
             )
+            traceback.print_exc()
 
 
 class Clean_Chain(Select):
@@ -555,7 +558,7 @@ def check_missing_pdb_csv_files(in_dir, out_dir) -> None:
     out_dict = get_directory_basename_dict(out_dir, "*.[pdb|csv]*")
 
     # Remove _discotope3 extension before comparison
-    out_dict = {re.sub(r"_discotope3$", "", k): v for k, v in out_dict.items()}
+    out_dict = {re.sub(r"_[A-Za-z]_discotope3$", "", k): v for k, v in out_dict.items()}
 
     # Log which input files are not found in output
     missing_pdbs = in_pdb_dict.keys() - out_dict.keys()
@@ -633,7 +636,9 @@ def main(args):
 
         # Zip output folder
         log.info(f"Compressing ZIP file")
-        out_zip = zip_folder_timeout(in_dir=args.out_dir, out_dir=args.out_dir)
+        out_zip = zip_folder_timeout(
+            in_dir=f"{args.out_dir}/output", out_dir=args.out_dir
+        )
 
         # Check which files failed
         check_missing_pdb_csv_files(pdb_or_tempdir, f"{args.out_dir}/output")
