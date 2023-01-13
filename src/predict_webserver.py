@@ -44,7 +44,7 @@ from make_dataset import Discotope_Dataset_web
 
 def cmdline_args():
     # Make parser object
-    usage = f"""
+    usage = fr"""
 Options:
     1) PDB file (--pdb_or_zip_file)
     2) Zip file of PDBs (--pdb_or_zip_file)
