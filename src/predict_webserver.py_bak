@@ -119,13 +119,13 @@ python src/predict_webserver.py \
     )
 
     p.add_argument(
-        "--check_existing",
+        "check_embeddings",
         default=False,
         help="Check for existing embeddings to load in pdb_dir",
     )
 
     p.add_argument(
-        "--save_embeddings",
+        "save_embeddings",
         default=False,
         help="Save embeddings to pdb_dir",
     )
