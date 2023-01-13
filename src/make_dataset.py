@@ -498,8 +498,8 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
         self,
         pdb_dir: str,
         structure_type: int,  # alphafold or solved
-        check_existing: bool = True,  # Try to load previous embedding files
-        save_embeddings: bool = True,  # Save new embedding files
+        check_existing: bool = False,  # Try to load previous embedding files
+        save_embeddings: bool = False,  # Save new embedding files
         preprocess: bool = True,
         n_jobs: int = 1,
         verbose: int = 0,

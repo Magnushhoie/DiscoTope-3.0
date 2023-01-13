@@ -119,18 +119,17 @@ python src/predict_webserver.py \
     )
 
     p.add_argument(
-        "--skip_embeddings",
-        help="Skip ESM-IF1 embedding step (False)",
+        "check_embeddings",
         default=False,
-        type=bool,
+        help="Check for existing embeddings to load in pdb_dir",
     )
 
     p.add_argument(
-        "--overwrite_embeddings",
-        dest="overwrite_embeddings",
-        help="Recreate PDB ESM-IF1 embeddings even if existing",
+        "save_embeddings",
         default=False,
+        help="Save embeddings to pdb_dir",
     )
+
     p.add_argument("-v", "--verbose", type=int, default=0, help="Verbose logging")
 
     return p.parse_args()
@@ -619,7 +618,11 @@ def main(args):
         # Embed and predict
         log.info(f"Pre-processing PDBs")
         dataset = Discotope_Dataset_web(
-            pdb_or_tempdir, structure_type=args.struc_type, verbose=args.verbose
+            pdb_or_tempdir,
+            structure_type=args.struc_type,
+            check_existing=args.check_existing,
+            save_embeddings=args.save_embeddings,
+            verbose=args.verbose,
         )
         if len(dataset) == 0:
             log.error("Error: No files in dataset.")
