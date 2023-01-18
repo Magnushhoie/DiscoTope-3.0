@@ -640,7 +640,7 @@ def main(args):
         # Zip output folder
         log.info(f"Compressing ZIP file")
         out_zip = zip_folder_timeout(
-            in_dir=f"{args.out_dir}/output", out_dir=args.out_dir
+            in_dir=f"{args.out_dir}/output", out_dir=f"{args.out_dir}/output"
         )
 
         # Check which files failed
@@ -671,7 +671,7 @@ def main(args):
             outcsv = f"{temp_id}/{sample['pdb_id']}_discotope3.csv"
 
             examples += "{"
-            examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/services/DiscoTope-3.0/tmp/{outcif}',info:'Structure {i+1}'"
+            examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/services/DiscoTope-3.0/tmp/{outpdb}',info:'Structure {i+1}'"
             examples += "},"
 
             style = ' style="margin-top:2em;"' if i > 0 else ""
