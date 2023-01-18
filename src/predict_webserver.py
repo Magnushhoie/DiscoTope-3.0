@@ -35,7 +35,6 @@ from argparse import ArgumentParser, RawTextHelpFormatter
 
 import requests
 from Bio.PDB import PDBIO, Select
-from Bio.PDB.mmcifio import MMCIFIO
 from Bio.PDB.PDBParser import PDBParser
 
 # Import make_dataset scripts
@@ -194,7 +193,7 @@ def predict_using_models(
 def write_model_prediction_csvs_pdbs(
     models, dataset, out_dir, verbose: int = 0
 ) -> None:
-    """Calculates predictions for dataset PDBs, saves output .csv and .pdb + .cif files"""
+    """Calculates predictions for dataset PDBs, saves output .csv and .pdb files"""
 
     for i, sample in enumerate(dataset):
         try:
@@ -241,11 +240,6 @@ def write_model_prediction_csvs_pdbs(
                     f"Writing {sample['pdb_id']} ({i+1}/{len(dataset)}) to {outfile}"
                 )
             strucio.save_structure(outfile, atom_array)
-            make_visualisation_cif(
-                outfile,
-                f"{out_dir}/{sample['pdb_id']}_discotope3.tmp.cif",
-                f"{out_dir}/{sample['pdb_id']}_discotope3.cif",
-            )
 
         except Exception as E:
             log.error(
@@ -255,8 +249,9 @@ def write_model_prediction_csvs_pdbs(
 
 
 class Clean_Chain(Select):
-    def __init__(self, score):
+    def __init__(self, score, chain=None):
         self.score = score
+        self.chain = chain
         if score is None:
             self.const_score = None
         elif isinstance(score, (int, float)):
@@ -273,6 +268,9 @@ class Clean_Chain(Select):
     # https://stackoverflow.com/questions/25718201/remove-heteroatoms-from-pdb
     def accept_residue(self, residue):
         return 1 if residue.id[0] == " " else 0
+
+    def accept_chain(self, chain):
+        return self.chain is None or chain == self.chain
 
     def accept_atom(self, atom):
         if self.const_score is None:
@@ -302,76 +300,6 @@ class Clean_Chain(Select):
         return True
 
 
-def make_visualisation_cif(in_pdb_path: str, out_tmp_cif_path: str, out_cif_path: str):
-    """
-    Make a CIF file with B-factors for visualisation
-    """
-    p = PDBParser(PERMISSIVE=True)
-
-    structure = p.get_structure("Name", in_pdb_path)
-    io = MMCIFIO()
-    io.set_structure(structure)
-    io.save(out_tmp_cif_path)
-
-    with open(out_tmp_cif_path, "r") as infile, open(out_cif_path, "w") as outfile:
-        outfile.write(infile.readline())
-        print(
-            "#",
-            "loop_",
-            "_ma_qa_metric.id",
-            "_ma_qa_metric.mode",
-            "_ma_qa_metric.name",
-            "_ma_qa_metric.software_group_id",
-            "_ma_qa_metric.type",
-            "1 global pLDDT 1 pLDDT",
-            "2 local  pLDDT 1 pLDDT",
-            sep="\n",
-            file=outfile,
-        )
-        print(
-            "#",
-            "loop_",
-            "_ma_qa_metric_local.label_asym_id",
-            "_ma_qa_metric_local.label_comp_id",
-            "_ma_qa_metric_local.label_seq_id",
-            "_ma_qa_metric_local.metric_id",
-            "_ma_qa_metric_local.metric_value",
-            "_ma_qa_metric_local.model_id",
-            "_ma_qa_metric_local.ordinal_id",
-            sep="\n",
-            file=outfile,
-        )
-
-        info_header = list()
-        for i in range(20):
-            info_header.append(infile.readline().strip())
-
-        atoms_cif = [x.strip() for x in infile.readlines()][:-1]
-        previous_resid = None
-
-        for entry in atoms_cif:
-            if previous_resid is None or previous_resid != int(entry[26:30]):
-                qa_metric = [" " for _ in range(24)]
-                auth_id = entry.split()[15]
-                # qa_metric[20:20+len(auth_id)] = auth_id
-                qa_metric[-4:] = entry[26:30]
-                qa_metric[0] = entry[22]
-                qa_metric[2:5] = entry[18:21]
-                qa_metric[6 : 6 + len(auth_id)] = auth_id
-                # qa_metric[6:10] = entry[26:30]
-                qa_metric[10] = "2"
-                qa_metric[12:17] = "{:.6f}".format(float(entry.split()[14]))[:5]
-                qa_metric[18] = "1"
-                previous_resid = int(entry[26:30])
-                print("".join(qa_metric), file=outfile)
-
-        for info in info_header:
-            print(info, file=outfile)
-        for entry in atoms_cif:
-            print(entry, file=outfile)
-        print("#", file=outfile)
-
-
 def save_pdb(pdb_name, pdb_path, out_prefix, score):
 
     p = PDBParser(PERMISSIVE=True)
@@ -382,8 +310,8 @@ def save_pdb(pdb_name, pdb_path, out_prefix, score):
     for chain in chains:
         pdb_out = f"{out_prefix}_{chain.get_id()}.pdb"
         io_w_no_h = PDBIO()
-        io_w_no_h.set_structure(chain)
-        io_w_no_h.save(pdb_out, Clean_Chain(score))
+        io_w_no_h.set_structure(structure)
+        io_w_no_h.save(pdb_out, Clean_Chain(score, chain.get_id()))
 
 
 def fetch_and_process_from_list_file(list_file, out_dir):
@@ -569,7 +497,8 @@ def zip_folder_timeout(in_dir, out_dir) -> str:
     """Zips in_dir, writes to out_dir, returns zip file"""
 
     timestamp = time.strftime("%Y%m%d%H%M")
-    zip_path = f"{out_dir}/discotope3_{timestamp}.zip"
+    file_name = f"discotope3_{timestamp}.zip"
+    zip_path = f"{out_dir}/{file_name}"
     bashCommand = f"zip {zip_path} {in_dir}/*.pdb {in_dir}/*.csv || exit"
 
     try:
@@ -577,7 +506,7 @@ def zip_folder_timeout(in_dir, out_dir) -> str:
             bashCommand, timeout=20, capture_output=True, shell=True
         )
         log.info(output.stdout.decode())
-        return zip_path
+        return file_name
     except subprocess.TimeoutExpired:
         log.error("Error: zip compression timed out")
         sys.exit(0)
@@ -648,10 +577,13 @@ def main(args):
         log.info(f"Done!")
 
         # HTML printing
+        web_prefix = "/".join(f"{args.out_dir}/output".rsplit("/", 5)[1:])
+        out_zip = f"{web_prefix}/{out_zip}"
+
         examples = """<script type="text/javascript">const examples = ["""
         print("<h2>Output download</h2>")
         print(
-            f'<a href="{out_zip}"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
+            f'<a href="/{out_zip}"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
         )
 
         print(
@@ -663,24 +595,21 @@ def main(args):
             """
         )
 
-        temp_id = "/".join(f"{args.out_dir}/output".rsplit("/", 2)[1:])
-
         for i, sample in enumerate(dataset):
-            outpdb = f"{temp_id}/{sample['pdb_id']}_discotope3.pdb"
-            outcif = f"{temp_id}/{sample['pdb_id']}_discotope3.cif"
-            outcsv = f"{temp_id}/{sample['pdb_id']}_discotope3.csv"
+            out_pdb = f"{web_prefix}/{sample['pdb_id']}_discotope3.pdb"
+            out_csv = f"{web_prefix}/{sample['pdb_id']}_discotope3.csv"
 
             examples += "{"
-            examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/services/DiscoTope-3.0/tmp/{outpdb}',info:'Structure {i+1}'"
+            examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/{out_pdb}',info:'Structure {i+1}'"
             examples += "},"
 
             style = ' style="margin-top:2em;"' if i > 0 else ""
             print(f"<h3{style}>{sample['pdb_id']}</h3>")
             print(
-                f'<a href="/services/DiscoTope-3.0/tmp/{outpdb}"><p>Download PDB w/ DiscoTope-3.0 prediction scores</p></a>'
+                f'<a href="/{out_pdb}"><p>Download PDB w/ DiscoTope-3.0 prediction scores</p></a>'
             )
             print(
-                f'<a href="/services/DiscoTope-3.0/tmp/{outcsv}"><p>Download CSV</p></a>'
+                f'<a href="/{out_csv}"><p>Download CSV</p></a>'
             )
 
         print("</div></div></div>")
