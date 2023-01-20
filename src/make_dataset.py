@@ -179,15 +179,16 @@ def load_IF1_tensors(
                     log.info(f"Saving {embed_file}")
                     torch.save(rep, embed_file)
 
+            list_IF1_tensors.append(rep)
+            list_structures.append(structure_full)
+            list_sequences.append(seq)
+
         except Exception as E:
             log.error(f"Unable to embed {_pdb}: {E}")
             list_IF1_tensors.append(False)
             list_structures.append(False)
             list_sequences.append(False)
-
-        list_IF1_tensors.append(rep)
-        list_structures.append(structure_full)
-        list_sequences.append(seq)
+            sys.exit(0)
 
     return list_IF1_tensors, list_structures, list_sequences
 

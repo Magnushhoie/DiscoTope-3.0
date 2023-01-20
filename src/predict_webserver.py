@@ -239,7 +239,25 @@ def write_model_prediction_csvs_pdbs(
                 log.info(
                     f"Writing {sample['pdb_id']} ({i+1}/{len(dataset)}) to {outfile}"
                 )
+
+            HEADER_INFO = ("HEADER", "TITLE", "COMPND", "SOURCE")
+            pdb_path = f"{out_dir.rsplit('/',1)[0]}/download/{sample['pdb_id']}.pdb"
+
+            header = list()
+            with open(pdb_path, "r") as f:
+                for line in f:
+                    if line.startswith(HEADER_INFO):
+                        header.append(line.strip())
+                    else:
+                        break 
+                
             strucio.save_structure(outfile, atom_array)
+
+            with open(outfile, "r+") as f:
+                content = f.read()
+                f.seek(0, 0)
+                print(*header, sep="\n", file=f)
+                f.write(content)
 
         except Exception as E:
             log.error(
@@ -301,9 +319,18 @@ class Clean_Chain(Select):
 
 
 def save_pdb(pdb_name, pdb_path, out_prefix, score):
+    HEADER_INFO = ("HEADER", "TITLE", "COMPND", "SOURCE")
 
     p = PDBParser(PERMISSIVE=True)
     structure = p.get_structure(pdb_name, pdb_path)
+
+    header = list()
+    with open(pdb_path, "r") as f:
+        for line in f:
+            if line.startswith(HEADER_INFO):
+                header.append(line.strip())
+            else:
+                break 
 
     chains = structure.get_chains()
 
@@ -311,7 +338,9 @@ def save_pdb(pdb_name, pdb_path, out_prefix, score):
         pdb_out = f"{out_prefix}_{chain.get_id()}.pdb"
         io_w_no_h = PDBIO()
         io_w_no_h.set_structure(structure)
-        io_w_no_h.save(pdb_out, Clean_Chain(score, chain.get_id()))
+        with open(pdb_out, "w") as f:
+            print(*header, sep="\n", file=f)
+            io_w_no_h.save(f, Clean_Chain(score, chain))
 
 
 def fetch_and_process_from_list_file(list_file, out_dir):
@@ -499,7 +528,7 @@ def zip_folder_timeout(in_dir, out_dir) -> str:
     timestamp = time.strftime("%Y%m%d%H%M")
     file_name = f"discotope3_{timestamp}.zip"
     zip_path = f"{out_dir}/{file_name}"
-    bashCommand = f"zip {zip_path} {in_dir}/*.pdb {in_dir}/*.csv || exit"
+    bashCommand = f"zip -j {zip_path} {in_dir}/*.pdb {in_dir}/*.csv || exit"
 
     try:
         output = subprocess.run(
@@ -581,6 +610,8 @@ def main(args):
         out_zip = f"{web_prefix}/{out_zip}"
 
         examples = """<script type="text/javascript">const examples = ["""
+        structures = """<script type="text/javascript">const structures = ["""
+
         print("<h2>Output download</h2>")
         print(
             f'<a href="/{out_zip}"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
@@ -602,19 +633,25 @@ def main(args):
             examples += "{"
             examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/{out_pdb}',info:'Structure {i+1}'"
             examples += "},"
+            structures += "`"
+            with open(f"{args.out_dir}/output/{sample['pdb_id']}_discotope3.pdb", "r") as f:
+                structures += f.read()
+            structures += "`,"
 
-            style = ' style="margin-top:2em;"' if i > 0 else ""
+            style = ' style="margin-top:1em;"' if i > 0 else ""
             print(f"<h3{style}>{sample['pdb_id']}</h3>")
             print(
-                f'<a href="/{out_pdb}"><p>Download PDB w/ DiscoTope-3.0 prediction scores</p></a>'
+                f'<a href="/{out_pdb}"><span>Download PDB w/ DiscoTope-3.0 prediction scores</span></a>'
             )
             print(
-                f'<a href="/{out_csv}"><p>Download CSV</p></a>'
+                f'<a href="/{out_csv}"><span>Download CSV</span></a> <br>'
             )
 
         print("</div></div></div>")
         examples += "];</script>"
+        structures += "];</script>"
         print(examples)
+        print(structures)
 
 
 if __name__ == "__main__":
