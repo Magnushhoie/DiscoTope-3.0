@@ -1,7 +1,10 @@
-## Environment installation notes
+## Setup
 
 ```bash
-# Environment installation notes
+# Unzip models
+unzip models.zip
+
+# Setup environment with conda
 conda create -n inverse python=3.9
 conda activate inverse
 conda install pytorch=1.11 cudatoolkit=11.3 -c pytorch   ## very important to specify pytorch package!
