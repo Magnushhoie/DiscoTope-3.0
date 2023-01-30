@@ -612,19 +612,18 @@ def main(args):
         examples = """<script type="text/javascript">const examples = ["""
         structures = """<script type="text/javascript">const structures = ["""
 
-        print("<h2>Output download</h2>")
-        print(
-            f'<a href="/{out_zip}"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
-        )
+        OUTPUT_HTML = ""
 
-        print(
-            """<div class="wrap-collabsible">
+        OUTPUT_HTML += "<h2>Output download</h2>"
+        OUTPUT_HTML += f'<a href="/{out_zip}"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
+        
+
+        OUTPUT_HTML += """<div class="wrap-collabsible">
             <input id="collapsible" class="toggle" type="checkbox">
             <label for="collapsible" class="lbl-toggle">Individual result downloads</label>
             <div class="collapsible-content">
             <div class="content-inner">
             """
-        )
 
         for i, sample in enumerate(dataset):
             out_pdb = f"{web_prefix}/{sample['pdb_id']}_discotope3.pdb"
@@ -639,19 +638,22 @@ def main(args):
             structures += "`,"
 
             style = ' style="margin-top:1em;"' if i > 0 else ""
-            print(f"<h3{style}>{sample['pdb_id']}</h3>")
-            print(
-                f'<a href="/{out_pdb}"><span>Download PDB w/ DiscoTope-3.0 prediction scores</span></a>'
-            )
-            print(
-                f'<a href="/{out_csv}"><span>Download CSV</span></a> <br>'
-            )
+            OUTPUT_HTML += f"<h3{style}>{sample['pdb_id']}</h3>"
+            OUTPUT_HTML += f'<a href="/{out_pdb}"><span>Download PDB w/ DiscoTope-3.0 prediction scores</span></a>'
+            OUTPUT_HTML += f'<a href="/{out_csv}"><span>Download CSV</span></a> <br>'
 
-        print("</div></div></div>")
+        OUTPUT_HTML +=  "</div></div></div>"
         examples += "];</script>"
         structures += "];</script>"
-        print(examples)
-        print(structures)
+        OUTPUT_HTML += examples
+        OUTPUT_HTML += structures
+
+        with open("output.html", "r") as f:
+            output_html = f.read()
+        
+        output_html_w_data = output_html.replace("INSERT_OUTPUT_HERE", OUTPUT_HTML)
+        with open("output.html", "w") as f:
+            f.write(output_html_w_data)
 
 
 if __name__ == "__main__":
