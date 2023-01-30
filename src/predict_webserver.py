@@ -557,6 +557,12 @@ def main(args):
                 shutil.copy(args.list_or_pdb_or_zip_file, pdb_or_tempdir)
 
 
+        # Load ESM-IF1 from LFS
+        ESM_MODEL_DIR = "/root/.cache/torch/hub/checkpoints/"
+        ESM_MODEL_FILE = "esm_if1_gvp4_t16_142M_UR50.pt"
+        os.makedirs(ESM_MODEL_DIR, exist_ok=True)
+        os.symlink(f"{args.models_dir}/{ESM_MODEL_FILE}", f"{ESM_MODEL_DIR}/{ESM_MODEL_FILE}")
+
         # Embed and predict
         log.info(f"Pre-processing PDBs")
         dataset = Discotope_Dataset_web(
@@ -598,45 +604,26 @@ def main(args):
 
         OUTPUT_HTML = ""
 
-        OUTPUT_HTML += "<h2>Output download</h2>"
-        OUTPUT_HTML += f'<a href="/{out_zip}"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
-        
-
-        OUTPUT_HTML += """<div class="wrap-collabsible">
-            <input id="collapsible" class="toggle" type="checkbox">
-            <label for="collapsible" class="lbl-toggle">Individual result downloads</label>
-            <div class="collapsible-content">
-            <div class="content-inner">
-            """
-
         for i, sample in enumerate(dataset):
-            out_pdb = f"{web_prefix}/{sample['pdb_id']}_discotope3.pdb"
-            out_csv = f"{web_prefix}/{sample['pdb_id']}_discotope3.csv"
 
             examples += "{"
-            examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/{out_pdb}',info:'Structure {i+1}'"
+            examples += f"id:'{sample['pdb_id']}',info:'Structure {i+1}'"
             examples += "},"
             structures += "`"
             with open(f"{args.out_dir}/output/{sample['pdb_id']}_discotope3.pdb", "r") as f:
                 structures += f.read()
             structures += "`,"
 
-            style = ' style="margin-top:1em;"' if i > 0 else ""
-            OUTPUT_HTML += f"<h3{style}>{sample['pdb_id']}</h3>"
-            OUTPUT_HTML += f'<a href="/{out_pdb}"><span>Download PDB w/ DiscoTope-3.0 prediction scores</span></a>'
-            OUTPUT_HTML += f'<a href="/{out_csv}"><span>Download CSV</span></a> <br>'
-
-        OUTPUT_HTML +=  "</div></div></div>"
         examples += "];</script>"
         structures += "];</script>"
         OUTPUT_HTML += examples
         OUTPUT_HTML += structures
 
-        with open("output.html", "r") as f:
+        with open("/output.html", "r") as f:
             output_html = f.read()
         
         output_html_w_data = output_html.replace("INSERT_OUTPUT_HERE", OUTPUT_HTML)
-        with open("output.html", "w") as f:
+        with open("/output.html", "w") as f:
             f.write(output_html_w_data)
 
 
