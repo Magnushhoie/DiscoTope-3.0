@@ -90,12 +90,8 @@ python src/predict_webserver.py \
     p.add_argument(
         "--struc_type",
         required=False,  # Only needed for file input, not list
+        default="alphafold",
         help="Structure type from file (solved | alphafold)",
-    )
-
-    p.add_argument(
-        "--list_id_type",
-        help="PDB ID type (rcsb or uniprot)",
     )
 
     p.add_argument(
@@ -369,14 +365,14 @@ def fetch_and_process_from_list_file(list_file, out_dir):
         else:
             log.info(f"Fetching {i+1}/{len(pdb_list)}: {prot_id}")
 
-        if args.list_id_type == "uniprot":
+        if args.struc_type == "alphafold":
             URL = f"https://alphafold.ebi.ac.uk/files/AF-{prot_id}-F1-model_v4.pdb"
             score = None
-        elif args.list_id_type == "rcsb":
+        elif args.struc_type == "solved":
             URL = f"https://files.rcsb.org/download/{prot_id}.pdb"
             score = 100
         else:
-            log.error(f"Structure ID was of unknown type {args.list_id_type}")
+            log.error(f"Structure ID was of unknown type {args.struc_type}")
             sys.exit(0)
 
         response = requests.get(URL)
@@ -428,8 +424,8 @@ def check_valid_input(args):
         )
         sys.exit(0)
 
-    if args.list_file and not args.list_id_type:
-        log.error(f"Must provide list_id_type (rcsb or uniprot) with list_file")
+    if args.list_file and not args.struc_type:
+        log.error(f"Must provide struc_type (solved or alphafold) with list_file")
         sys.exit()
 
     if args.pdb_or_zip_file and args.struc_type not in ["solved", "alphafold"]:
