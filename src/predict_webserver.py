@@ -607,7 +607,7 @@ def main(args):
         for i, sample in enumerate(dataset):
 
             examples += "{"
-            examples += f"id:'{sample['pdb_id']}',info:'Structure {i+1}'"
+            examples += f"id:'{sample['pdb_id']}',url:'{web_prefix}/{sample['pdb_id']}_discotope3.pdb',info:'Structure {i+1}'"
             examples += "},"
             structures += "`"
             with open(f"{args.out_dir}/output/{sample['pdb_id']}_discotope3.pdb", "r") as f:
