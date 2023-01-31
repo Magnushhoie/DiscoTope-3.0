@@ -1,6 +1,9 @@
 ## Setup
 
 ```bash
+# Full training, validation and test dataset available at:
+https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0
+
 # Unzip models
 unzip models.zip
 
