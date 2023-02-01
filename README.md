@@ -22,14 +22,17 @@ pip install -r requirements.txt
 
 ## Usage 
 ```bash
-# Predict zip file of solved PDBs
-python src/predict_webserver.py --in_file data/single_solved.zip --struc_type solved --verbose 2
+# Predict on example PDBs in data folder
+python src/predict_webserver.py \
+--pdb_dir data/ \
+--struc_type solved \
+--out_dir job_out/data
 
-# Predict list file, Alphafold UNIPROT IDs
-python src/predict_webserver.py --list_file af2_list_uniprot --list_id uniprot --struc_type alphafold --out_dir job_out/test_af2
-
-# Predict list file, RCSB solved IDs
-python src/predict_webserver.py --list_file solved_list_rcsb --list_id rcsb --struc_type solved --out_dir job_out/test_solved
+# Fetch PDBs from list file from AlphaFoldDB
+python src/predict_webserver.py \
+--list_file data/af2_list_uniprot.txt \
+--struc_type alphafold \
+--out_dir job_out/af2_list_uniprot
 
 # See more options
 python automate.py

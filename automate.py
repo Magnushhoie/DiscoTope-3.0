@@ -101,19 +101,19 @@ while True:
         msg(
             rf"""
         python src/predict_webserver.py \
-        --pdb_or_zip_file data/1L36.pdb \
+        --pdb_or_zip_file data/7lkh.pdb \
         --struc_type solved \
-        --out_dir job_out/1L36 \
+        --out_dir job_out/7lkh \
         {verbose} 
         """
         )
 
-    if selected(choice, "5", "Predict single PDB ID (local)"):
+    if selected(choice, "5", "Predict folder containing PDBs files (local)"):
 
         msg(
             rf"""
         python src/predict_webserver.py \
-        --pdb_dir data/ \
+        --pdb_dir data \
         --struc_type solved \
         --out_dir job_out/data \
         {verbose} 
