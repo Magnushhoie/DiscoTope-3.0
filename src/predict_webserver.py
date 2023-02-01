@@ -43,7 +43,7 @@ from make_dataset import Discotope_Dataset_web
 
 def cmdline_args():
     # Make parser object
-    usage = fr"""
+    usage = rf"""
 Options:
     1) PDB file (--pdb_or_zip_file)
     2) Zip file of PDBs (--pdb_or_zip_file)
@@ -245,8 +245,8 @@ def write_model_prediction_csvs_pdbs(
                     if line.startswith(HEADER_INFO):
                         header.append(line.strip())
                     else:
-                        break 
-                
+                        break
+
             strucio.save_structure(outfile, atom_array)
 
             with open(outfile, "r+") as f:
@@ -326,7 +326,7 @@ def save_pdb(pdb_name, pdb_path, out_prefix, score):
             if line.startswith(HEADER_INFO):
                 header.append(line.strip())
             else:
-                break 
+                break
 
     chains = structure.get_chains()
 
@@ -630,7 +630,9 @@ def main(args):
             examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/{out_pdb}',info:'Structure {i+1}'"
             examples += "},"
             structures += "`"
-            with open(f"{args.out_dir}/output/{sample['pdb_id']}_discotope3.pdb", "r") as f:
+            with open(
+                f"{args.out_dir}/output/{sample['pdb_id']}_discotope3.pdb", "r"
+            ) as f:
                 structures += f.read()
             structures += "`,"
 
@@ -639,9 +641,7 @@ def main(args):
             print(
                 f'<a href="/{out_pdb}"><span>Download PDB w/ DiscoTope-3.0 prediction scores</span></a>'
             )
-            print(
-                f'<a href="/{out_csv}"><span>Download CSV</span></a> <br>'
-            )
+            print(f'<a href="/{out_csv}"><span>Download CSV</span></a> <br>')
 
         print("</div></div></div>")
         examples += "];</script>"
