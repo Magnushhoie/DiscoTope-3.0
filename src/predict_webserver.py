@@ -380,8 +380,9 @@ def fetch_and_process_from_list_file(list_file, out_dir):
             with open(f"{out_dir}/temp", "wb") as f:
                 f.write(response.content)
         elif response.status_code == 404:
-            log.error(f"File with the given ID could not be found (url: {URL}).")
+            log.error(f"File with the ID {prot_id} could not be found (url: {URL}).")
             log.error("Maybe you selected the wrong ID type or misspelled the ID.")
+            log.error("Note that pdb files may not exist in RCSB for large structures - sorry for the inconvenience.")
             sys.exit(0)
         elif response.status_code in (408, 504):
             log.error(

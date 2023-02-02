@@ -188,7 +188,6 @@ def load_IF1_tensors(
             list_IF1_tensors.append(False)
             list_structures.append(False)
             list_sequences.append(False)
-            sys.exit(0)
 
     return list_IF1_tensors, list_structures, list_sequences
 
