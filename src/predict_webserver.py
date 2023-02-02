@@ -5,19 +5,19 @@ MAX_FILES = 50
 MAX_FILE_SIZE_MB = 30
 
 import logging
-import subprocess
-import traceback
 
-logging.basicConfig(level=logging.INFO, format="[{asctime}] {message}", style="{")
+logging.basicConfig(level=logging.ERROR, format="[{asctime}] {message}", style="{")
 log = logging.getLogger(__name__)
 
 import glob
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from contextlib import closing
 # Set project path two levels up
 from pathlib import Path
@@ -43,25 +43,26 @@ from make_dataset import Discotope_Dataset_web
 
 def cmdline_args():
     # Make parser object
-    usage = fr"""
+    usage = rf"""
 Options:
     1) PDB file (--pdb_or_zip_file)
     2) Zip file of PDBs (--pdb_or_zip_file)
     3) PDB directory (--pdb_dir)
     4) File with PDB ids on each line (--list_file)
 
-# Predict on example PDBs in folder
+# Predict on example PDBs in data folder
 python src/predict_webserver.py \
---pdb_dir data/test \
+--pdb_dir data/ \
 --struc_type solved \
---out_dir job_out/test
+--out_dir job_out/data
 
-# Predict only on PDBs IDs specified in antigens.fasta entries
+# Fetch PDBs from list file from AlphaFoldDB
 python src/predict_webserver.py \
---fasta data/test.fasta \
---pdb_dir pdbs_embeddings \
---out_dir job_out/test
-    """
+--list_file data/af2_list_uniprot.txt \
+--struc_type alphafold \
+--out_dir job_out/af2_list_uniprot
+
+"""
     p = ArgumentParser(
         description="Predict Discotope-3.0 score on folder of input AF2 PDBs",
         formatter_class=RawTextHelpFormatter,
@@ -73,6 +74,12 @@ python src/predict_webserver.py \
             parser.error(f"Path {arg} does not exist!")
         else:
             return arg
+
+    p.add_argument(
+        "--web_server_mode",
+        default=False,
+        help="Web server mode (True | (False)) prints HTML output",
+    )
 
     p.add_argument(
         "-f",
@@ -126,6 +133,11 @@ python src/predict_webserver.py \
     )
 
     p.add_argument("-v", "--verbose", type=int, default=0, help="Verbose logging")
+
+    # Print help if no arguments
+    if len(sys.argv) == 1:
+        p.print_help(sys.stderr)
+        sys.exit(1)
 
     return p.parse_args()
 
@@ -187,9 +199,11 @@ def predict_using_models(
 
 
 def write_model_prediction_csvs_pdbs(
-    models, dataset, out_dir, verbose: int = 0
+    models, dataset, pdb_or_tempdir, out_dir, verbose: int = 0
 ) -> None:
     """Calculates predictions for dataset PDBs, saves output .csv and .pdb files"""
+
+    os.makedirs(f"{out_dir}/download", exist_ok=True)
 
     for i, sample in enumerate(dataset):
         try:
@@ -237,7 +251,8 @@ def write_model_prediction_csvs_pdbs(
                 )
 
             HEADER_INFO = ("HEADER", "TITLE", "COMPND", "SOURCE")
-            pdb_path = f"{out_dir.rsplit('/',1)[0]}/download/{sample['pdb_id']}.pdb"
+            pdb_path = f"{pdb_or_tempdir}/{sample['pdb_id']}.pdb"
+            # pdb_path = f"{out_dir.rsplit('/',1)[0]}/download/{sample['pdb_id']}.pdb"
 
             header = list()
             with open(pdb_path, "r") as f:
@@ -245,8 +260,8 @@ def write_model_prediction_csvs_pdbs(
                     if line.startswith(HEADER_INFO):
                         header.append(line.strip())
                     else:
-                        break 
-                
+                        break
+
             strucio.save_structure(outfile, atom_array)
 
             with open(outfile, "r+") as f:
@@ -326,7 +341,7 @@ def save_pdb(pdb_name, pdb_path, out_prefix, score):
             if line.startswith(HEADER_INFO):
                 header.append(line.strip())
             else:
-                break 
+                break
 
     chains = structure.get_chains()
 
@@ -506,6 +521,8 @@ def get_directory_basename_dict(directory: str, glob_ext: str) -> dict:
 def check_missing_pdb_csv_files(in_dir, out_dir) -> None:
     """Reports missing CSV and PDB file in out_dir, per PDB file in in_dir"""
 
+    pass
+
     # Get basenames of input PDBs and output PDB/CSV files
     in_pdb_dict = get_directory_basename_dict(in_dir, "*.pdb")
     out_dict = get_directory_basename_dict(out_dir, "*.[pdb|csv]*")
@@ -514,9 +531,9 @@ def check_missing_pdb_csv_files(in_dir, out_dir) -> None:
     out_dict = {re.sub(r"_[A-Za-z]_discotope3$", "", k): v for k, v in out_dict.items()}
 
     # Log which input files are not found in output
-    missing_pdbs = in_pdb_dict.keys() - out_dict.keys()
-    if len(missing_pdbs) > 0:
-        log.error(f"INFO: Failed processing PDBs: {', '.join(list(missing_pdbs))}")
+    # missing_pdbs = in_pdb_dict.keys() - out_dict.keys()
+    # if len(missing_pdbs) > 0:
+    #    log.error(f"INFO: Failed processing PDBs: {', '.join(list(missing_pdbs))}")
 
 
 def zip_folder_timeout(in_dir, out_dir) -> str:
@@ -589,7 +606,11 @@ def main(args):
 
         log.info(f"Writing prediction .csv and .pdb files")
         write_model_prediction_csvs_pdbs(
-            models, dataset, out_dir=f"{args.out_dir}/output", verbose=args.verbose
+            models,
+            dataset,
+            pdb_or_tempdir,
+            out_dir=f"{args.out_dir}/output",
+            verbose=args.verbose,
         )
 
         # Zip output folder
@@ -602,53 +623,54 @@ def main(args):
         check_missing_pdb_csv_files(pdb_or_tempdir, f"{args.out_dir}/output")
         log.info(f"Done!")
 
-        # HTML printing
-        web_prefix = "/".join(f"{args.out_dir}/output".rsplit("/", 5)[1:])
-        out_zip = f"{web_prefix}/{out_zip}"
+        if args.web_server_mode:
+            # HTML printing
+            web_prefix = "/".join(f"{args.out_dir}/output".rsplit("/", 5)[1:])
+            out_zip = f"{web_prefix}/{out_zip}"
 
-        examples = """<script type="text/javascript">const examples = ["""
-        structures = """<script type="text/javascript">const structures = ["""
+            examples = """<script type="text/javascript">const examples = ["""
+            structures = """<script type="text/javascript">const structures = ["""
 
-        print("<h2>Output download</h2>")
-        print(
-            f'<a href="/{out_zip}"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
-        )
-
-        print(
-            """<div class="wrap-collabsible">
-            <input id="collapsible" class="toggle" type="checkbox">
-            <label for="collapsible" class="lbl-toggle">Individual result downloads</label>
-            <div class="collapsible-content">
-            <div class="content-inner">
-            """
-        )
-
-        for i, sample in enumerate(dataset):
-            out_pdb = f"{web_prefix}/{sample['pdb_id']}_discotope3.pdb"
-            out_csv = f"{web_prefix}/{sample['pdb_id']}_discotope3.csv"
-
-            examples += "{"
-            examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/{out_pdb}',info:'Structure {i+1}'"
-            examples += "},"
-            structures += "`"
-            with open(f"{args.out_dir}/output/{sample['pdb_id']}_discotope3.pdb", "r") as f:
-                structures += f.read()
-            structures += "`,"
-
-            style = ' style="margin-top:1em;"' if i > 0 else ""
-            print(f"<h3{style}>{sample['pdb_id']}</h3>")
+            print("<h2>Output download</h2>")
             print(
-                f'<a href="/{out_pdb}"><span>Download PDB w/ DiscoTope-3.0 prediction scores</span></a>'
-            )
-            print(
-                f'<a href="/{out_csv}"><span>Download CSV</span></a> <br>'
+                f'<a href="/{out_zip}"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
             )
 
-        print("</div></div></div>")
-        examples += "];</script>"
-        structures += "];</script>"
-        print(examples)
-        print(structures)
+            print(
+                """<div class="wrap-collabsible">
+                <input id="collapsible" class="toggle" type="checkbox">
+                <label for="collapsible" class="lbl-toggle">Individual result downloads</label>
+                <div class="collapsible-content">
+                <div class="content-inner">
+                """
+            )
+
+            for i, sample in enumerate(dataset):
+                out_pdb = f"{web_prefix}/{sample['pdb_id']}_discotope3.pdb"
+                out_csv = f"{web_prefix}/{sample['pdb_id']}_discotope3.csv"
+
+                examples += "{"
+                examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/{out_pdb}',info:'Structure {i+1}'"
+                examples += "},"
+                structures += "`"
+                with open(
+                    f"{args.out_dir}/output/{sample['pdb_id']}_discotope3.pdb", "r"
+                ) as f:
+                    structures += f.read()
+                structures += "`,"
+
+                style = ' style="margin-top:1em;"' if i > 0 else ""
+                print(f"<h3{style}>{sample['pdb_id']}</h3>")
+                print(
+                    f'<a href="/{out_pdb}"><span>Download PDB w/ DiscoTope-3.0 prediction scores</span></a>'
+                )
+                print(f'<a href="/{out_csv}"><span>Download CSV</span></a> <br>')
+
+            print("</div></div></div>")
+            examples += "];</script>"
+            structures += "];</script>"
+            print(examples)
+            print(structures)
 
 
 if __name__ == "__main__":
@@ -664,6 +686,14 @@ if __name__ == "__main__":
     )
     log = logging.getLogger(__name__)
     log.info("Predicting PDBs using Discotope-3.0")
+
+    # Print logging/errors to console if web server mode (viewable HTML)
+    if args.web_server_mode:
+        logging.getLogger().addHandler(logging.StreamHandler())
+
+    # Verbose logging
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
 
     try:
         main(args)

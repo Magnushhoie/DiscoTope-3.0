@@ -147,9 +147,8 @@ def load_IF1_tensors(
             structure, structure_full = load_structure_discotope(
                 str(pdb_path), chain=None
             )
-            coords, seq = esm.inverse_folding.util.extract_coords_from_structure(
-                structure
-            )
+
+            coords, seq = esm_util_custom.extract_coords_from_structure(structure)
 
             # Load if already exists
             embed_file = re.sub(r".pdb$", ".pt", pdb_path)
@@ -185,6 +184,9 @@ def load_IF1_tensors(
 
         except Exception as E:
             log.error(f"Unable to embed {_pdb}: {E}")
+            import traceback
+
+            traceback.print_exc()
             list_IF1_tensors.append(False)
             list_structures.append(False)
             list_sequences.append(False)
