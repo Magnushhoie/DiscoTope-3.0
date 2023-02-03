@@ -631,6 +631,7 @@ def main(args):
             examples = """<script type="text/javascript">const examples = ["""
             structures = """<script type="text/javascript">const structures = ["""
 
+            print("</span></div></div></div>")
             print("<h2>Output download</h2>")
             print(
                 f'<a href="/{out_zip}"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
@@ -638,8 +639,8 @@ def main(args):
 
             print(
                 """<div class="wrap-collabsible">
-                <input id="collapsible" class="toggle" type="checkbox">
-                <label for="collapsible" class="lbl-toggle">Individual result downloads</label>
+                <input id="collapsible-1" class="toggle" type="checkbox">
+                <label for="collapsible-1" class="lbl-toggle">Individual result downloads</label>
                 <div class="collapsible-content">
                 <div class="content-inner">
                 """
@@ -677,6 +678,7 @@ if __name__ == "__main__":
 
     args = cmdline_args()
     os.makedirs(f"{args.out_dir}/output", exist_ok=True)
+    
     logging.basicConfig(
         filename=f"{args.out_dir}/output/dt3.log",
         encoding="utf-8",
@@ -688,8 +690,8 @@ if __name__ == "__main__":
     log.info("Predicting PDBs using Discotope-3.0")
 
     # Print logging/errors to console if web server mode (viewable HTML)
-    if args.web_server_mode:
-        logging.getLogger().addHandler(logging.StreamHandler())
+    #if args.web_server_mode:
+    #    logging.getLogger().addHandler(logging.StreamHandler())
 
     # Verbose logging
     if args.verbose:
