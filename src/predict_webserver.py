@@ -11,30 +11,35 @@ log = logging.getLogger(__name__)
 
 import glob
 import os
-import sys
 import re
 import shutil
-from zipfile import ZipFile
-from typing import List
-from argparse import ArgumentParser, RawTextHelpFormatter
-
-# Import modules
 import subprocess
+import sys
 import tempfile
 import time
-from pathlib import Path
 import traceback
 from contextlib import closing
+# Set project path two levels up
+from pathlib import Path
+from typing import List
+from zipfile import ZipFile
+
 import biotite
 import biotite.structure.io as strucio
 import numpy as np
 import xgboost as xgb
+
+ROOT_PATH = str(os.path.dirname(os.getcwd()))
+
+from argparse import ArgumentParser, RawTextHelpFormatter
+
 import requests
-from pathlib import Path
 from Bio.PDB import PDBIO, Select
 from Bio.PDB.PDBParser import PDBParser
+
+# Import make_dataset scripts
 from make_dataset import Discotope_Dataset_web
-import traceback
+
 
 def cmdline_args():
     # Make parser object
@@ -137,94 +142,6 @@ python src/predict_webserver.py \
     return p.parse_args()
 
 
-def check_valid_input(args):
-    """Checks for valid arguments"""
-
-    # Check input arguments
-    if not (args.pdb_or_zip_file or args.pdb_dir or args.list_file):
-        if args.web_server_mode:
-            log.error(
-                f"""Please provide one of:
-            a) Upload PDB file or ZIP file containing PDB files
-            b) A list of protein structure IDs
-            """
-            )
-        else:
-            log.error(
-                f"""Please choose one of:
-            1) PDB file (--pdb_or_zip_file)
-            2) Zip file with PDBs (--pdb_or_zip_file)
-            3) PDB directory (--pdb_dir)
-            4) File with PDB ids on each line (--list_file)
-            """
-            )
-        sys.exit(0)
-
-    if args.list_file and not args.struc_type:
-        log.error(f"Must provide struc_type (solved or alphafold) with list_file")
-        sys.exit()
-
-    if args.pdb_or_zip_file and args.struc_type not in ["solved", "alphafold"]:
-        log.error(
-            f"--struc_type flag invalid, must be solved or alphafold. Found {args.struc_type}"
-        )
-        sys.exit(0)
-
-    if (
-        (args.pdb_dir and args.list_file)
-        or (args.pdb_dir and args.pdb_or_zip_file)
-        or (args.list_file and args.pdb_or_zip_file)
-    ):
-        log.error(
-            f"Please choose only one of flags: pdb_dir, list_file or pdb_or_zip_file"
-        )
-        print(args)
-        sys.exit(0)
-
-    if args.pdb_dir and args.pdb_or_zip_file:
-        log.error(f"Both pdb_dir and list_file flags set, please chooose one")
-        sys.exit(0)
-
-    # Check ZIP max-size, number of files
-    if args.pdb_or_zip_file:
-        size_mb = os.stat(args.pdb_or_zip_file).st_size / (1024 * 1024)
-        if size_mb > MAX_FILES:
-            log.error(f"Max file-size {MAX_FILE_SIZE_MB} MB, found {round(size_mb)} MB")
-            sys.exit(0)
-
-        if true_if_zip(args.pdb_or_zip_file):
-            with closing(ZipFile(args.pdb_or_zip_file)) as archive:
-                file_count = len(archive.infolist())
-                file_names = archive.namelist()
-
-            # Check number of files in zip
-            if file_count > MAX_FILES:
-                log.error(f"Max number of files {file_count}, found {file_count}")
-                sys.exit(0)
-
-            # Check filenames end in .pdb
-            name = file_names[0]
-            if os.path.splitext(name)[-1] != ".pdb":
-                log.error(
-                    f"Ensure all ZIP content file-names end in .pdb, found {name}"
-                )
-                sys.exit(0)
-
-    # Check XGBoost models present
-    models = glob.glob(f"{args.models_dir}/XGB_*_of_*.json")
-    if len(models) != 100:
-        log.error(f"Only found {len(models)}/100 models in {args.models_dir}")
-        log.error(
-            f"Did you download/unzip the model JSON files (e.g. XGB_1_of_100.json)?"
-        )
-        sys.exit(0)
-
-def true_if_zip(infile):
-    """Returns True if file header bits are zip file"""
-    with open(infile, "rb") as fb:
-        header_bits = fb.read(4)
-    return header_bits == b"PK\x03\x04"
-
 def load_models(
     models_dir: str,
     num_models: int = 100,
@@ -255,9 +172,9 @@ def load_models(
 
 
 def predict_using_models(
-    models: List['xgb.XGBClassifier'],
-    X: 'np.array',
-) -> 'np.array':
+    models: List[xgb.XGBClassifier],
+    X: np.array,
+) -> np.array:
     """Returns np.array of predictions averaged from ensemble of XGBoost models"""
 
     def predict_PU_prob(X, estimator, prob_s1y1):
@@ -360,58 +277,59 @@ def write_model_prediction_csvs_pdbs(
             traceback.print_exc()
 
 
+class Clean_Chain(Select):
+    def __init__(self, score, chain=None):
+        self.score = score
+        self.chain = chain
+        if score is None:
+            self.const_score = None
+        elif isinstance(score, (int, float)):
+            self.const_score = True
+        else:
+            self.const_score = False
+        self.init_resid = None
+        self.prev_resid = None
+        self.letter_correction = 0
+        self.letter = " "
+        self.prev_letter = " "
+
+    # Clean out non-heteroatoms
+    # https://stackoverflow.com/questions/25718201/remove-heteroatoms-from-pdb
+    def accept_residue(self, residue):
+        return 1 if residue.id[0] == " " else 0
+
+    def accept_chain(self, chain):
+        return self.chain is None or chain == self.chain
+
+    def accept_atom(self, atom):
+        if self.const_score is None:
+            pass
+        elif self.const_score:
+            atom.set_bfactor(self.score)
+        else:
+            self.letter = atom.get_full_id()[3][2]
+            if atom.get_full_id()[3][2] not in (self.prev_letter, " "):
+                log.info(
+                    f"A residue with lettered numbering was found ({atom.get_full_id()[3][1]}{atom.get_full_id()[3][2]}). This may mess up visualisation."
+                )
+                self.letter_correction += 1
+            self.prev_letter = self.letter
+
+            res_id = atom.get_full_id()[3][1] + self.letter_correction
+
+            if self.init_resid is None:
+                self.init_resid = res_id
+
+            if self.prev_resid is not None and res_id - self.prev_resid > 1:
+                self.init_resid += res_id - self.prev_resid - 1
+
+            self.prev_resid = res_id
+
+            atom.set_bfactor(self.score[res_id - self.init_resid])
+        return True
+
 
 def save_pdb(pdb_name, pdb_path, out_prefix, score):
-    class Clean_Chain(Select):
-        def __init__(self, score, chain=None):
-            self.score = score
-            self.chain = chain
-            if score is None:
-                self.const_score = None
-            elif isinstance(score, (int, float)):
-                self.const_score = True
-            else:
-                self.const_score = False
-            self.init_resid = None
-            self.prev_resid = None
-            self.letter_correction = 0
-            self.letter = " "
-            self.prev_letter = " "
-
-        # Clean out non-heteroatoms
-        # https://stackoverflow.com/questions/25718201/remove-heteroatoms-from-pdb
-        def accept_residue(self, residue):
-            return 1 if residue.id[0] == " " else 0
-
-        def accept_chain(self, chain):
-            return self.chain is None or chain == self.chain
-
-        def accept_atom(self, atom):
-            if self.const_score is None:
-                pass
-            elif self.const_score:
-                atom.set_bfactor(self.score)
-            else:
-                self.letter = atom.get_full_id()[3][2]
-                if atom.get_full_id()[3][2] not in (self.prev_letter, " "):
-                    log.info(
-                        f"A residue with lettered numbering was found ({atom.get_full_id()[3][1]}{atom.get_full_id()[3][2]}). This may mess up visualisation."
-                    )
-                    self.letter_correction += 1
-                self.prev_letter = self.letter
-
-                res_id = atom.get_full_id()[3][1] + self.letter_correction
-
-                if self.init_resid is None:
-                    self.init_resid = res_id
-
-                if self.prev_resid is not None and res_id - self.prev_resid > 1:
-                    self.init_resid += res_id - self.prev_resid - 1
-
-                self.prev_resid = res_id
-
-                atom.set_bfactor(self.score[res_id - self.init_resid])
-            return True
     HEADER_INFO = ("HEADER", "TITLE", "COMPND", "SOURCE")
 
     p = PDBParser(PERMISSIVE=True)
@@ -500,7 +418,86 @@ def fetch_and_process_from_list_file(list_file, out_dir):
         save_pdb(f"{prot_id}", f"{out_dir}/temp", f"{out_dir}/{prot_id}", score)
 
 
+def true_if_zip(infile):
+    """Returns True if file header bits are zip file"""
+    with open(infile, "rb") as fb:
+        header_bits = fb.read(4)
+    return header_bits == b"PK\x03\x04"
 
+
+def check_valid_input(args):
+    """Checks for valid arguments"""
+
+    # Check input arguments
+    if not (args.pdb_or_zip_file or args.pdb_dir or args.list_file):
+        log.error(
+            f"""Please choose one of:
+        1) PDB file (--pdb_or_zip_file)
+        2) Zip file with PDBs (--pdb_or_zip_file)
+        3) PDB directory (--pdb_dir)
+        4) File with PDB ids on each line (--list_file)
+        """
+        )
+        sys.exit(0)
+
+    if args.list_file and not args.struc_type:
+        log.error(f"Must provide struc_type (solved or alphafold) with list_file")
+        sys.exit()
+
+    if args.pdb_or_zip_file and args.struc_type not in ["solved", "alphafold"]:
+        log.error(
+            f"--struc_type flag invalid, must be solved or alphafold. Found {args.struc_type}"
+        )
+        sys.exit(0)
+
+    if (
+        (args.pdb_dir and args.list_file)
+        or (args.pdb_dir and args.pdb_or_zip_file)
+        or (args.list_file and args.pdb_or_zip_file)
+    ):
+        log.error(
+            f"Please choose only one of flags: pdb_dir, list_file or pdb_or_zip_file"
+        )
+        print(args)
+        sys.exit(0)
+
+    if args.pdb_dir and args.pdb_or_zip_file:
+        log.error(f"Both pdb_dir and list_file flags set, please chooose one")
+        sys.exit(0)
+
+    # Check ZIP max-size, number of files
+    if args.pdb_or_zip_file:
+        size_mb = os.stat(args.pdb_or_zip_file).st_size / (1024 * 1024)
+        if size_mb > MAX_FILES:
+            log.error(f"Max file-size {MAX_FILE_SIZE_MB} MB, found {round(size_mb)} MB")
+            sys.exit(0)
+
+        if true_if_zip(args.pdb_or_zip_file):
+            with closing(ZipFile(args.pdb_or_zip_file)) as archive:
+                file_count = len(archive.infolist())
+                file_names = archive.namelist()
+
+            # Check number of files in zip
+            if file_count > MAX_FILES:
+                log.error(f"Max number of files {file_count}, found {file_count}")
+                sys.exit(0)
+
+            # Check filenames end in .pdb
+            name = file_names[0]
+            if os.path.splitext(name)[-1] != ".pdb":
+                log.error(
+                    f"Ensure all ZIP content file-names end in .pdb, found {name}"
+                )
+                sys.exit(0)
+
+    # Check XGBoost models present
+    models = glob.glob(f"{args.models_dir}/XGB_*_of_*.json")
+    if len(models) != 100:
+        log.error(f"Only found {len(models)}/100 models in {args.models_dir}")
+        log.error(
+            f"Did you download/unzip the model JSON files (e.g. XGB_1_of_100.json)?"
+        )
+        sys.exit(0)
 
 
 def get_basename_no_ext(filepath):
@@ -560,6 +557,9 @@ def zip_folder_timeout(in_dir, out_dir) -> str:
 
 def main(args):
     """Main function"""
+
+    # Error messages if invalid input
+    check_valid_input(args)
 
     # Create temporary directory
     with tempfile.TemporaryDirectory() as pdb_or_tempdir:
@@ -682,35 +682,25 @@ if __name__ == "__main__":
     logging.basicConfig(
         filename=f"{args.out_dir}/output/dt3.log",
         encoding="utf-8",
-        level=logging.ERROR,
+        level=logging.INFO,
         format="[{asctime}] {message}",
         style="{",
     )
     log = logging.getLogger(__name__)
+    log.info("Predicting PDBs using Discotope-3.0")
 
     # Print logging/errors to console if web server mode (viewable HTML)
-    if args.web_server_mode:
-        logging.getLogger().setLevel(logging.ERROR)
+    #if args.web_server_mode:
+    #    logging.getLogger().addHandler(logging.StreamHandler())
 
     # Verbose logging
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
-    # Otherwise exclude warnings
-    else:
-        import warnings
-        warnings.filterwarnings("ignore")
-
-    log.info("Predicting PDBs using Discotope-3.0")
 
     try:
-        # Error messages if invalid input
-        check_valid_input(args)
-
-        # Run main program
         main(args)
-
-
     except Exception as E:
         log.exception(
             f"Prediction encountered an unexpected error. This is likely a bug in the server software: {E}"
         )
+
