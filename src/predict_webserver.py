@@ -83,15 +83,10 @@ python src/predict_webserver.py \
 
     p.add_argument(
         "-f",
-        "--pdb_or_zip_file",
-        dest="pdb_or_zip_file",
-        help="Input file, either single PDB or compressed zip file with multiple PDBs",
+        "--list_or_pdb_or_zip_file",
+        dest="list_or_pdb_or_zip_file",
+        help="File with PDB or Uniprot IDs, fetched from RCSB/AlphaFolddb (1) or single PDB input file (2) or compressed zip file with multiple PDBs (3)",
         type=lambda x: is_valid_path(p, x),
-    )
-
-    p.add_argument(
-        "--list_file",
-        help="File with PDB or Uniprot IDs, fetched from RCSB/AlphaFolddb",
     )
 
     p.add_argument(
@@ -424,71 +419,40 @@ def true_if_zip(infile):
         header_bits = fb.read(4)
     return header_bits == b"PK\x03\x04"
 
+def true_if_list(infile):
+    """Returns True if file header bits are zip file"""
+    with open(infile, "r") as f:
+        first_line = f.readline()
+    PDB_REGEX = r"[0-9][A-Za-z0-9]{3}"
+    UNIPROT_REGEX = r"[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2}"
+    return (re.search(PDB_REGEX, first_line) is not None) or (re.search(UNIPROT_REGEX, first_line) is not None)
 
 def check_valid_input(args):
     """Checks for valid arguments"""
 
+    # pdb_or_zip_file
+    # list_file
+
     # Check input arguments
-    if not (args.pdb_or_zip_file or args.pdb_dir or args.list_file):
+    if not (args.list_or_pdb_or_zip_file):
         log.error(
             f"""Please choose one of:
-        1) PDB file (--pdb_or_zip_file)
-        2) Zip file with PDBs (--pdb_or_zip_file)
-        3) PDB directory (--pdb_dir)
-        4) File with PDB ids on each line (--list_file)
+        1) PDB file
+        2) Zip file with PDBs
+        4) File with PDB ids on each line
         """
         )
         sys.exit(0)
 
-    if args.list_file and not args.struc_type:
-        log.error(f"Must provide struc_type (solved or alphafold) with list_file")
-        sys.exit()
+    if args.list_or_pdb_or_zip_file and not args.struc_type:
+        log.error(f"Must provide struc_type (solved or alphafold)")
+        sys.exit(0)
 
-    if args.pdb_or_zip_file and args.struc_type not in ["solved", "alphafold"]:
+    if args.list_or_pdb_or_zip_file and args.struc_type not in ["solved", "alphafold"]:
         log.error(
             f"--struc_type flag invalid, must be solved or alphafold. Found {args.struc_type}"
         )
         sys.exit(0)
-
-    if (
-        (args.pdb_dir and args.list_file)
-        or (args.pdb_dir and args.pdb_or_zip_file)
-        or (args.list_file and args.pdb_or_zip_file)
-    ):
-        log.error(
-            f"Please choose only one of flags: pdb_dir, list_file or pdb_or_zip_file"
-        )
-        print(args)
-        sys.exit(0)
-
-    if args.pdb_dir and args.pdb_or_zip_file:
-        log.error(f"Both pdb_dir and list_file flags set, please chooose one")
-        sys.exit(0)
-
-    # Check ZIP max-size, number of files
-    if args.pdb_or_zip_file:
-        size_mb = os.stat(args.pdb_or_zip_file).st_size / (1024 * 1024)
-        if size_mb > MAX_FILES:
-            log.error(f"Max file-size {MAX_FILE_SIZE_MB} MB, found {round(size_mb)} MB")
-            sys.exit(0)
-
-        if true_if_zip(args.pdb_or_zip_file):
-            with closing(ZipFile(args.pdb_or_zip_file)) as archive:
-                file_count = len(archive.infolist())
-                file_names = archive.namelist()
-
-            # Check number of files in zip
-            if file_count > MAX_FILES:
-                log.error(f"Max number of files {file_count}, found {file_count}")
-                sys.exit(0)
-
-            # Check filenames end in .pdb
-            name = file_names[0]
-            if os.path.splitext(name)[-1] != ".pdb":
-                log.error(
-                    f"Ensure all ZIP content file-names end in .pdb, found {name}"
-                )
-                sys.exit(0)
 
     # Check XGBoost models present
     models = glob.glob(f"{args.models_dir}/XGB_*_of_*.json")
@@ -498,6 +462,34 @@ def check_valid_input(args):
             f"Did you download/unzip the model JSON files (e.g. XGB_1_of_100.json)?"
         )
         sys.exit(0)
+
+    size_mb = os.stat(args.list_or_pdb_or_zip_file).st_size / (1024 * 1024)
+    if size_mb > MAX_FILES:
+        log.error(f"Max file-size {MAX_FILE_SIZE_MB} MB, found {round(size_mb)} MB")
+        sys.exit(0)
+
+    if true_if_list(args.list_or_pdb_or_zip_file):
+        return True # IS LIST FILE
+
+    # Check ZIP max-size, number of files
+    if true_if_zip(args.list_or_pdb_or_zip_file):
+        with closing(ZipFile(args.list_or_pdb_or_zip_file)) as archive:
+            file_count = len(archive.infolist())
+            file_names = archive.namelist()
+
+        # Check number of files in zip
+        if file_count > MAX_FILES:
+            log.error(f"Max number of files {file_count}, found {file_count}")
+            sys.exit(0)
+
+        # Check filenames end in .pdb
+        name = file_names[0]
+        if os.path.splitext(name)[-1] != ".pdb":
+            log.error(
+                f"Ensure all ZIP content file-names end in .pdb, found {name}"
+            )
+            sys.exit(0)
+        return # IS NOT LIST FILE
 
 
 def get_basename_no_ext(filepath):
@@ -559,7 +551,7 @@ def main(args):
     """Main function"""
 
     # Error messages if invalid input
-    check_valid_input(args)
+    is_list_file = check_valid_input(args)
 
     # Create temporary directory
     with tempfile.TemporaryDirectory() as pdb_or_tempdir:
@@ -567,25 +559,27 @@ def main(args):
         pdb_or_tempdir = f"{args.out_dir}/download"
         os.makedirs(pdb_or_tempdir, exist_ok=True)
 
-        # 1. Download PDBs from RCSB or AlphaFoldDB
-        if args.list_file:
+        if is_list_file:
+            # 1. Download PDBs from RCSB or AlphaFoldDB
             log.info(f"Fetching PDBs")
-            fetch_and_process_from_list_file(args.list_file, pdb_or_tempdir)
-
-        # 2. Unzip if ZIP, else single PDB
-        if args.pdb_or_zip_file:
-            if true_if_zip(args.pdb_or_zip_file):
+            fetch_and_process_from_list_file(args.list_or_pdb_or_zip_file, pdb_or_tempdir)
+        else:
+            # 2. Unzip if ZIP, else single PDB
+            if true_if_zip(args.list_or_pdb_or_zip_file):
                 log.info(f"Unzipping PDBs")
-                zf = ZipFile(args.pdb_or_zip_file)
+                zf = ZipFile(args.list_or_pdb_or_zip_file)
                 zf.extractall(pdb_or_tempdir)
 
             # 3. If single PDB, copy to tempdir
             else:
-                shutil.copy(args.pdb_or_zip_file, pdb_or_tempdir)
+                shutil.copy(args.list_or_pdb_or_zip_file, pdb_or_tempdir)
 
-        # 4. Load from PDB folder
-        if args.pdb_dir:
-            pdb_or_tempdir = args.pdb_dir
+
+        # Load ESM-IF1 from LFS
+        ESM_MODEL_DIR = "/root/.cache/torch/hub/checkpoints/"
+        ESM_MODEL_FILE = "esm_if1_gvp4_t16_142M_UR50.pt"
+        os.makedirs(ESM_MODEL_DIR, exist_ok=True)
+        os.symlink(f"{args.models_dir}/{ESM_MODEL_FILE}", f"{ESM_MODEL_DIR}/{ESM_MODEL_FILE}")
 
         # Embed and predict
         log.info(f"Pre-processing PDBs")
