@@ -23,7 +23,6 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-import traceback
 from contextlib import closing
 import biotite
 import biotite.structure.io as strucio
@@ -142,14 +141,22 @@ def check_valid_input(args):
 
     # Check input arguments
     if not (args.pdb_or_zip_file or args.pdb_dir or args.list_file):
-        log.error(
-            f"""Please choose one of:
-        1) PDB file (--pdb_or_zip_file)
-        2) Zip file with PDBs (--pdb_or_zip_file)
-        3) PDB directory (--pdb_dir)
-        4) File with PDB ids on each line (--list_file)
-        """
-        )
+        if args.web_server_mode:
+            log.error(
+                f"""Please provide one of:
+            a) Upload PDB file or ZIP file containing PDB files
+            b) A list of protein structure IDs
+            """
+            )
+        else:
+            log.error(
+                f"""Please choose one of:
+            1) PDB file (--pdb_or_zip_file)
+            2) Zip file with PDBs (--pdb_or_zip_file)
+            3) PDB directory (--pdb_dir)
+            4) File with PDB ids on each line (--list_file)
+            """
+            )
         sys.exit(0)
 
     if args.list_file and not args.struc_type:
