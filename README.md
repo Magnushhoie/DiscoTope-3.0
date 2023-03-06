@@ -5,7 +5,7 @@ Magnus Haraldson Høie, Frederik Steensgaard Gade, Julie Maria Johansen, Charlot
 
 Accurate computational identification of B-cell epitopes is crucial for the development of vaccines, therapies, and diagnostic tools. Structure-based prediction methods generally outperform sequence-based models, but are limited by the availability of experimentally solved structures. Here, we present DiscoTope-3.0, a B-cell epitope prediction tool that exploits inverse folding representations from solved or AlphaFold-predicted structures. On independent datasets, the method demonstrates improved performance on both linear and non-linear epitopes with respect to current state-of-the-art algorithms. Most notably, our tool maintains high predictive performance across solved and predicted structures, alleviating the need for experiments and extending the general applicability of the tool by more than 4 orders of magnitude. DiscoTope-3.0 is available as a web server and downloadable package, processing up to 50 structures per submission. The web server interfaces with RCSB and AlphaFoldDB, enabling large-scale prediction on all currently cataloged proteins. DiscoTope-3.0 is available as a web server at [https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0](https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0)
 
-## Setup
+## Setup (~3-5 mins)
 
 ```bash
 # Full training, validation and test dataset available at:
