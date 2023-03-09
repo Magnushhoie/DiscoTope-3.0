@@ -13,11 +13,14 @@
 
 # Overview
 
-DiscoTope-3.0 predicts B-cell epitope propensity for input protein structure PDB files. Per-residue epitope propensity is outputted both as PDB files and matching CSV files. The tool accepts both experimental and AlphaFold2 modeled structures, with similar performance for both. The tool exploit inverse folding latent representations using ESM-IF1 for epitope prediction based on the protein backbone. Note that the tool is only trained and validated on single chains, meaning epitopes may predicted in interface regions.
+DiscoTope-3.0 is a structure-based B-cell epitope prediction tool, exploiting inverse folding latent representations from the [ESM-IF1](https://github.com/facebookresearch/esm) model. The tool accepts input protein structures in the [PDB](https://en.wikipedia.org/wiki/Protein_Data_Bank_(file_format)) format (solved or predicted), and outputs per-residue epitope propensity scores in both a PDB and CSV format.
 
-Web server and full datasets are available at: https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0
-Mirror: https://biolib.com/DTU/DiscoTope-3/
-Paper doi: [10.1101/2023.02.05.527174](https://www.biorxiv.org/content/10.1101/2023.02.05.527174v1)
+DiscoTope-3.0 accepts both experimental and AlphaFold2 modeled structures, with similar performance for both. It has been trained and validated only on single chain structures, meaning epitopes may be predicted in interface regions.
+
+- Paper: [10.1101/2023.02.05.527174](https://www.biorxiv.org/content/10.1101/2023.02.05.527174v1)
+- Full training/validation/testing datasets: https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0
+- Web server DTU: https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0
+- Web server BioLib: https://biolib.com/DTU/DiscoTope-3/
 
 # Repo contents
 
