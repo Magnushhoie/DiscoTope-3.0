@@ -6,8 +6,12 @@ from pathlib import Path
 ROOT_PATH = str(Path(os.getcwd()))
 sys.path.insert(0, "ROOT_PATH")
 
-import glob
 import logging
+
+logging.basicConfig(level=logging.ERROR, format="[{asctime}] {message}", style="{")
+log = logging.getLogger(__name__)
+
+import glob
 import re
 import traceback
 from argparse import ArgumentParser, RawTextHelpFormatter

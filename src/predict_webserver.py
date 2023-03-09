@@ -9,10 +9,16 @@ import logging
 logging.basicConfig(level=logging.ERROR, format="[{asctime}] {message}", style="{")
 log = logging.getLogger(__name__)
 
+# Ignore Biopython deprecation warnings
+import warnings
+from Bio import BiopythonDeprecationWarning
+warnings.filterwarnings("ignore", category=BiopythonDeprecationWarning)
+
 import glob
 import os
 import re
 import shutil
+
 # Import modules
 import subprocess
 import sys
@@ -40,22 +46,22 @@ def cmdline_args():
     # Make parser object
     usage = rf"""
 Options:
-    1) PDB file (--pdb_or_zip_file)
-    2) Zip file of PDBs (--pdb_or_zip_file)
-    3) PDB directory (--pdb_dir)
-    4) File with PDB ids on each line (--list_file)
+    1) PDB file (--pdb_or_zip_file <file>)
+    2) Zip file of PDBs (--pdb_or_zip_file <file>)
+    3) PDB directory (--pdb_dir <folder>)
+    4) File with PDB ids on each line (--list_file <file>)
 
 # Predict on example PDBs in data folder
 python src/predict_webserver.py \
---pdb_dir data/ \
+--pdb_dir data/example_pdbs_solved \
 --struc_type solved \
 --out_dir output/data
 
 # Fetch PDBs from list file from AlphaFoldDB
 python src/predict_webserver.py \
---list_file data/af2_list_uniprot.txt \
+--list_file data/pdb_list_af2.txt \
 --struc_type alphafold \
---out_dir output/af2_list_uniprot
+--out_dir output/pdb_list_af2
 
 """
     p = ArgumentParser(
@@ -72,8 +78,9 @@ python src/predict_webserver.py \
 
     p.add_argument(
         "--web_server_mode",
+        action='store_true',
         default=False,
-        help="Web server mode (True | (False)) prints HTML output",
+        help="Flag for printing HTML output",
     )
 
     p.add_argument(
@@ -120,8 +127,8 @@ python src/predict_webserver.py \
     p.add_argument(
         "--save_embeddings", default=False, help="Save embeddings to pdb_dir",
     )
-
-    p.add_argument("-v", "--verbose", type=int, default=0, help="Verbose logging")
+ 
+    p.add_argument("-v", "--verbose", type=int, default=1, help="Verbose logging")
 
     # Print help if no arguments
     if len(sys.argv) == 1:
@@ -680,29 +687,36 @@ if __name__ == "__main__":
     )
     log = logging.getLogger(__name__)
 
-    # Print logging/errors to console if web server mode (viewable HTML)
+    # Error messages if invalid input
+    check_valid_input(args)
+
+    # Web server mode: print logging/errors to console, viewable in HTML
     if args.web_server_mode:
-        logging.getLogger().setLevel(logging.ERROR)
 
-    # Verbose logging
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
-    # Otherwise exclude warnings
+        # Exclude deprecation warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+
+            try:
+                main(args)
+
+            except Exception as E:
+                log.exception(
+                    f"Prediction encountered an unexpected error. This is likely a bug in the server software: {E}"
+                )
+
+    # Running locally
     else:
-        import warnings
 
-        warnings.filterwarnings("ignore")
+        # Verbose logging setting
+        if args.verbose == 1:
+            logging.getLogger().setLevel(logging.INFO)
 
-    log.info("Predicting PDBs using Discotope-3.0")
-
-    try:
-        # Error messages if invalid input
-        check_valid_input(args)
+        elif args.verbose >= 2:
+            logging.getLogger().setLevel(logging.DEBUG)
 
         # Run main program
+        log.info("Predicting PDBs using Discotope-3.0")
         main(args)
 
-    except Exception as E:
-        log.exception(
-            f"Prediction encountered an unexpected error. This is likely a bug in the server software: {E}"
-        )
+        log.info("Done!")
