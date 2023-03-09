@@ -11,29 +11,30 @@ log = logging.getLogger(__name__)
 
 import glob
 import os
-import sys
 import re
 import shutil
-from zipfile import ZipFile
-from typing import List
-from argparse import ArgumentParser, RawTextHelpFormatter
-
 # Import modules
 import subprocess
+import sys
 import tempfile
 import time
-from pathlib import Path
+import traceback
+from argparse import ArgumentParser, RawTextHelpFormatter
 from contextlib import closing
+from pathlib import Path
+from typing import List
+from zipfile import ZipFile
+
 import biotite
 import biotite.structure.io as strucio
 import numpy as np
-import xgboost as xgb
 import requests
-from pathlib import Path
+import xgboost as xgb
 from Bio.PDB import PDBIO, Select
 from Bio.PDB.PDBParser import PDBParser
+
 from make_dataset import Discotope_Dataset_web
-import traceback
+
 
 def cmdline_args():
     # Make parser object
@@ -48,13 +49,13 @@ Options:
 python src/predict_webserver.py \
 --pdb_dir data/ \
 --struc_type solved \
---out_dir job_out/data
+--out_dir output/data
 
 # Fetch PDBs from list file from AlphaFoldDB
 python src/predict_webserver.py \
 --list_file data/af2_list_uniprot.txt \
 --struc_type alphafold \
---out_dir job_out/af2_list_uniprot
+--out_dir output/af2_list_uniprot
 
 """
     p = ArgumentParser(
@@ -96,15 +97,11 @@ python src/predict_webserver.py \
     )
 
     p.add_argument(
-        "--pdb_dir",
-        help="Directory with AF2 PDBs",
-        type=lambda x: is_valid_path(p, x),
+        "--pdb_dir", help="Directory with AF2 PDBs", type=lambda x: is_valid_path(p, x),
     )
 
     p.add_argument(
-        "--out_dir",
-        default="job_out/job1",
-        help="Job output directory",
+        "--out_dir", default="output/job1", help="Job output directory",
     )
 
     p.add_argument(
@@ -121,9 +118,7 @@ python src/predict_webserver.py \
     )
 
     p.add_argument(
-        "--save_embeddings",
-        default=False,
-        help="Save embeddings to pdb_dir",
+        "--save_embeddings", default=False, help="Save embeddings to pdb_dir",
     )
 
     p.add_argument("-v", "--verbose", type=int, default=0, help="Verbose logging")
@@ -218,16 +213,16 @@ def check_valid_input(args):
         )
         sys.exit(0)
 
+
 def true_if_zip(infile):
     """Returns True if file header bits are zip file"""
     with open(infile, "rb") as fb:
         header_bits = fb.read(4)
     return header_bits == b"PK\x03\x04"
 
+
 def load_models(
-    models_dir: str,
-    num_models: int = 100,
-    verbose: int = 1,
+    models_dir: str, num_models: int = 100, verbose: int = 1,
 ) -> List["xgb.XGBClassifier"]:
     """Loads saved XGBoostClassifier files containing model weights, returns list of XGBoost models"""
     import xgboost as xgb
@@ -254,9 +249,8 @@ def load_models(
 
 
 def predict_using_models(
-    models: List['xgb.XGBClassifier'],
-    X: 'np.array',
-) -> 'np.array':
+    models: List["xgb.XGBClassifier"], X: "np.array",
+) -> "np.array":
     """Returns np.array of predictions averaged from ensemble of XGBoost models"""
 
     def predict_PU_prob(X, estimator, prob_s1y1):
@@ -359,7 +353,6 @@ def write_model_prediction_csvs_pdbs(
             traceback.print_exc()
 
 
-
 def save_pdb(pdb_name, pdb_path, out_prefix, score):
     class Clean_Chain(Select):
         def __init__(self, score, chain=None):
@@ -411,6 +404,7 @@ def save_pdb(pdb_name, pdb_path, out_prefix, score):
 
                 atom.set_bfactor(self.score[res_id - self.init_resid])
             return True
+
     HEADER_INFO = ("HEADER", "TITLE", "COMPND", "SOURCE")
 
     p = PDBParser(PERMISSIVE=True)
@@ -478,7 +472,9 @@ def fetch_and_process_from_list_file(list_file, out_dir):
         elif response.status_code == 404:
             log.error(f"File with the ID {prot_id} could not be found (url: {URL}).")
             log.error("Maybe you selected the wrong ID type or misspelled the ID.")
-            log.error("Note that pdb files may not exist in RCSB for large structures - sorry for the inconvenience.")
+            log.error(
+                "Note that pdb files may not exist in RCSB for large structures - sorry for the inconvenience."
+            )
             sys.exit(0)
         elif response.status_code in (408, 504):
             log.error(
@@ -497,9 +493,6 @@ def fetch_and_process_from_list_file(list_file, out_dir):
             sys.exit(0)
 
         save_pdb(f"{prot_id}", f"{out_dir}/temp", f"{out_dir}/{prot_id}", score)
-
-
-
 
 
 def get_basename_no_ext(filepath):
@@ -526,7 +519,7 @@ def check_missing_pdb_csv_files(in_dir, out_dir) -> None:
     pass
 
     # Get basenames of input PDBs and output PDB/CSV files
-    in_pdb_dict = get_directory_basename_dict(in_dir, "*.pdb")
+    # in_pdb_dict = get_directory_basename_dict(in_dir, "*.pdb")
     out_dict = get_directory_basename_dict(out_dir, "*.[pdb|csv]*")
 
     # Remove _discotope3 extension before comparison
@@ -677,7 +670,7 @@ if __name__ == "__main__":
 
     args = cmdline_args()
     os.makedirs(f"{args.out_dir}/output", exist_ok=True)
-    
+
     logging.basicConfig(
         filename=f"{args.out_dir}/output/dt3.log",
         encoding="utf-8",
@@ -697,6 +690,7 @@ if __name__ == "__main__":
     # Otherwise exclude warnings
     else:
         import warnings
+
         warnings.filterwarnings("ignore")
 
     log.info("Predicting PDBs using Discotope-3.0")
@@ -708,9 +702,7 @@ if __name__ == "__main__":
         # Run main program
         main(args)
 
-
     except Exception as E:
         log.exception(
             f"Prediction encountered an unexpected error. This is likely a bug in the server software: {E}"
         )
-

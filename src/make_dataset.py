@@ -1,15 +1,16 @@
+# ROOT_Path
+import sys
+import os
+from pathlib import Path
+
+ROOT_PATH = str(Path(os.getcwd()))
+sys.path.insert(0, "ROOT_PATH")
+
 import glob
 import logging
-
-logging.basicConfig(level=logging.INFO, format="[{asctime}] {message}", style="{")
-log = logging.getLogger(__name__)
-
-import os
 import re
-import sys
 import traceback
-# Set project path two levels up
-from pathlib import Path
+from argparse import ArgumentParser, RawTextHelpFormatter
 from typing import List
 
 import Bio
@@ -20,21 +21,14 @@ import pandas as pd
 import prody
 import torch
 from Bio import SeqIO
+# Use Sander values instead
+from Bio.Data.PDBData import residue_sasa_scales
+from Bio.SeqUtils import seq1
 from biotite.sequence import ProteinSequence
 from biotite.structure import filter_backbone, get_chains
 from biotite.structure.io import pdb, pdbx
 from biotite.structure.residues import get_residues
 from joblib import Parallel, delayed
-
-# ROOT_Path 2 levels up
-ROOT_PATH = str(Path(os.getcwd()))
-sys.path.insert(0, ROOT_PATH)
-
-from argparse import ArgumentParser, RawTextHelpFormatter
-
-# Use Sander values instead
-from Bio.Data.PDBData import residue_sasa_scales
-from Bio.SeqUtils import seq1
 
 import esm_util_custom
 
@@ -55,9 +49,7 @@ def cmdline_args():
     --out_dir data/processed/test__1
     """
     p = ArgumentParser(
-        description="Make dataset",
-        formatter_class=RawTextHelpFormatter,
-        usage=usage,
+        description="Make dataset", formatter_class=RawTextHelpFormatter, usage=usage,
     )
 
     def is_valid_path(parser, arg):
@@ -80,10 +72,7 @@ def cmdline_args():
         type=lambda x: is_valid_path(p, x),
     )
     p.add_argument(
-        "--out_dir",
-        required=True,
-        help="Job output directory",
-        metavar="FOLDER",
+        "--out_dir", required=True, help="Job output directory", metavar="FOLDER",
     )
     p.add_argument(
         "--pdb_dir",
@@ -120,10 +109,7 @@ def cmdline_args():
 
 
 def load_IF1_tensors(
-    pdb_files: List,
-    check_existing=True,
-    save_embeddings=True,
-    verbose: int = 1,
+    pdb_files: List, check_existing=True, save_embeddings=True, verbose: int = 1,
 ) -> List:
     """Generate or load ESM-IF1 embeddings for a list of PDB files"""
 
@@ -319,7 +305,7 @@ def save_fasta_from_pdbs(pdb_dir: str, out_dir: str):
 def embed_pdbs_IF1(
     pdb_dir: str,
     out_dir: str,
-    input_fasta: dict[str, "Bio.SeqRecord.SeqRecord"],
+    input_fasta: 'dict[str, "Bio.SeqRecord.SeqRecord"]',
     struc_type: str,
     overwrite_embeddings=False,
     verbose: int = 1,
@@ -399,7 +385,7 @@ def embed_pdbs_IF1(
 
 def get_atomarray_seq_residx(
     atom_array: biotite.structure.AtomArray,
-) -> tuple[str, np.ndarray]:
+) -> "tuple[str, np.ndarray]":
     """Returns sequence and residue indices for an atom array"""
 
     res_idxs, res_names = get_residues(atom_array)
