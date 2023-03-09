@@ -57,14 +57,13 @@ Linux: Ubuntu 18.04
 - [fair-esm 0.5](https://github.com/facebookresearch/esm)
 - [Biopython](https://github.com/biopython/biopython)
 - [Biotite](https://github.com/biotite-dev/biotite)
-- [fastpdb](https://github.com/biotite-dev/fastpdb)
 - [prody](https://github.com/prody/ProDy)
 - [pandas](https://github.com/pandas-dev/pandas)
 - [numpy](https://github.com/numpy/numpy)
 
-# Installation guide
+# Installation guide (~ 2 mins)
 
-## Installing on Ubuntu 18.04 (~ 2 mins)
+## Installing with conda (Linux) (recommended, ~2 mins) 
 
 ```bash
 # Setup environment with conda
@@ -74,10 +73,19 @@ conda install pytorch=1.11 cudatoolkit=11.3 -c pytorch   ## very important to sp
 conda install pyg -c pyg -c conda-forge ## very important to make sure pytorch and cuda versions not being changed
 conda install pip
 
-# further requirements
+# install pip dependencies
 pip install -r requirements.txt
 
-# Unzip model weights
+# Unzip models
+unzip models.zip
+```
+
+## Installing with pip only (Linux) (~5 mins)
+```bash
+# install pip dependencies
+pip install -r requirements_full.txt
+
+# Unzip models
 unzip models.zip
 ```
 

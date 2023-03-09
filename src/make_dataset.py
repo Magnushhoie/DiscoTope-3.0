@@ -15,7 +15,6 @@ from typing import List
 
 import Bio
 import biotite.structure
-import fastpdb
 import numpy as np
 import pandas as pd
 import prody
@@ -193,6 +192,7 @@ def load_structure_discotope(fpath, chain=None):
     Returns:
         [biotite.structure.AtomArray]
     """
+
     if fpath[-3:] == "cif":
         with open(fpath) as fin:
             pdbxf = pdbx.PDBxFile.read(fin)
@@ -201,15 +201,12 @@ def load_structure_discotope(fpath, chain=None):
     elif fpath[-3:] == "pdb":
         with open(fpath) as fin:
             try:
-                # Try fast processing
-                pdbf = fastpdb.PDBFile.read(fin)
+                pdbf = pdb.PDBFile.read(fin)
                 structure_full = pdbf.get_structure(model=1, extra_fields=["b_factor"])
             except Exception as E:
                 log.info(
-                    f"Unable to load PDB with fastpdb, retrying with Biotite:\n{E}"
+                    f"Unable to read PDB file {fpath}: {E}"
                 )
-                pdbf = pdb.PDBFile.read(fin)
-                structure_full = pdbf.get_structure(model=1, extra_fields=["b_factor"])
 
     bbmask = filter_backbone(structure_full)
     structure = structure_full[bbmask]

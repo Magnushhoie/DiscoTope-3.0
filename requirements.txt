@@ -1,10 +1,7 @@
 biopython==1.80
 biotite==0.34.0
 fair-esm==0.5.0
-fastpdb==1.0.1
 numpy==1.22.4
 pandas==1.4.3
 ProDy==2.3.1
-scikit-learn==1.1.1
-scipy==1.5.3
 xgboost==1.6.1
