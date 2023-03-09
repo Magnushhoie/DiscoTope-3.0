@@ -61,7 +61,7 @@ Linux: Ubuntu 18.04
 - [pandas](https://github.com/pandas-dev/pandas)
 - [numpy](https://github.com/numpy/numpy)
 
-# Installation guide (~ 2 mins)
+# Installation guide
 
 ## Installing with conda (Linux) (recommended, ~2 mins) 
 
@@ -97,7 +97,7 @@ conda install -c conda-forge py-xgboost-gpu
 
 # Demo
 
-On a common workstation with a GPU, predictions takes ~ 1 second per PDB chain with ~ 15 seconds for loading needed libraries and model weight. Ensure model weights are unzipped by first running 'unzip models.zip' (see [Installation Guide](#installation-guide))
+On a common workstation with a GPU, predictions takes ~ 1 second per PDB chain with ~ 15 seconds for loading needed libraries and model weight. Ensure XGBoost model weights are unzipped by first running 'unzip models.zip' (see [Installation Guide](#installation-guide)). ESM-IF1 weights will be automatically downloaded the first time the prediction script is run (~ 1 min)
 
 ## Predict a single PDB (solved structure)
 
@@ -108,13 +108,17 @@ python src/predict_webserver.py \
 --out_dir output/7lkh
 ```
 
-## Reproduce test-set predictions (AlphaFold structures)
+## Reproduce test-set predictions (AlphaFold2 structures)
 
 ```bash
+# Unzip AlphaFold2 test set
+unzip data/test_set_af2.zip -d data/
+
+# Run predictions on folder
 python src/predict_webserver.py \
---pdb_dir data/test_set_solved \
+--pdb_dir data/test_set_af2 \
 --struc_type alphafold \
---out_dir output/test_set_solved
+--out_dir output/test_set_af2
 ```
 
 ## Running on own data
