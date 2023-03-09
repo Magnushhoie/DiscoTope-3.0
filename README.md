@@ -32,9 +32,9 @@ Paper doi: [10.1101/2023.02.05.527174](https://www.biorxiv.org/content/10.1101/2
 
 For minimal performance, only a single core and ca 8 GB of RAM is needed. For optional performance, we recommend the following specs:
 
-RAM: 16+ GB  
-CPU: 4+ cores
-GPU is optional.
+- RAM: 16+ GB
+- CPU: 4+ cores
+- GPU is optional
 
 ## Software Requirements
 
@@ -47,14 +47,17 @@ The package development version is tested on a *Linux* operating system. The dev
 Linux: Ubuntu 18.04
 
 ### Python requirements
-[Python 3.9](https://www.python.org/downloads/)
-[Pytorch 1.11](https://pytorch.org/get-started/locally/)
-[cudatoolkit 11.3](https://anaconda.org/anaconda/cudatoolkit)
-[Pytorch geometric 2.0.4](https://github.com/pyg-team/pytorch_geometric)
-[Biopython 1.8](https://github.com/biopython/biopython)
-[Biotite 0.34](https://github.com/biotite-dev/biotite)
-[fair-esm 0.5](https://github.com/facebookresearch/esm)
-[pandas 1.4](https://github.com/pandas-dev/pandas)
+- [Python 3.9](https://www.python.org/downloads/)
+- [Pytorch 1.11](https://pytorch.org/get-started/locally/)
+- [cudatoolkit 11.3](https://anaconda.org/anaconda/cudatoolkit)
+- [Pytorch geometric 2.0.4](https://github.com/pyg-team/pytorch_geometric)
+- [fair-esm 0.5](https://github.com/facebookresearch/esm)
+- [Biopython](https://github.com/biopython/biopython)
+- [Biotite](https://github.com/biotite-dev/biotite)
+- [fastpdb](https://github.com/biotite-dev/fastpdb)
+- [prody](https://github.com/prody/ProDy)
+- [pandas](https://github.com/pandas-dev/pandas)
+- [numpy](https://github.com/numpy/numpy)
 
 # Installation guide
 
@@ -83,9 +86,9 @@ conda install -c conda-forge py-xgboost-gpu
 
 # Demo
 
-On a common workstation with a GPU, predictions takes ~ 1 second per PDB chain with ~ 15 seconds for loading needed libraries and model weight.
+On a common workstation with a GPU, predictions takes ~ 1 second per PDB chain with ~ 15 seconds for loading needed libraries and model weight. Ensure model weights are unzipped by first running 'unzip models.zip' (see [Installation Guide](#installation-guide))
 
-## Predict a single PDB (solved structure, ~15 s)
+## Predict a single PDB (solved structure)
 
 ```bash
 python src/predict_webserver.py \
@@ -94,7 +97,7 @@ python src/predict_webserver.py \
 --out_dir output/7lkh
 ```
 
-## Reproduce test-set predictions (AlphaFold structures ~1 m)
+## Reproduce test-set predictions (AlphaFold structures)
 
 ```bash
 python src/predict_webserver.py \
@@ -177,4 +180,4 @@ For usage of the package and associated manuscript, please cite according to the
 
 # License
 
-This source code is licensed under the Creative Commons license found in the LICENSE file in the root directory of this source tree.
+This source code is licensed under the Creative Commons license found in the [LICENSE](./LICENSE) file in the root directory of this source tree.
