@@ -5,10 +5,8 @@ MAX_FILES = 50
 MAX_FILE_SIZE_MB = 30
 
 import logging
-
-logging.basicConfig(level=logging.ERROR, format="[{asctime}] {message}", style="{")
-log = logging.getLogger(__name__)
-
+import os
+import sys
 # Ignore Biopython deprecation warnings
 import warnings
 
@@ -16,17 +14,13 @@ from Bio import BiopythonDeprecationWarning
 
 warnings.filterwarnings("ignore", category=BiopythonDeprecationWarning)
 
-import re
 import copy
 import glob
 import os
-
-# Import modules
+import re
 import subprocess
-import sys
 import tempfile
 import time
-import traceback
 from argparse import ArgumentParser, RawTextHelpFormatter
 from contextlib import closing
 from pathlib import Path
@@ -43,6 +37,11 @@ from Bio.PDB import PDBIO, Select
 from Bio.PDB.PDBParser import PDBParser
 
 from make_dataset import Discotope_Dataset_web
+
+# import traceback
+
+
+
 
 
 def cmdline_args():
@@ -175,17 +174,19 @@ def check_valid_input(args):
             4) File with PDB ids on each line (--list_file)
             """
             )
-        sys.exit(0)
+        sys.exit(1)
 
     if args.list_file and not args.struc_type:
-        log.error(f"Must provide struc_type (solved or alphafold) with list_file")
+        log.error(
+            f"Error: Must provide struc_type (solved or alphafold) with list_file"
+        )
         sys.exit()
 
     if args.pdb_or_zip_file and args.struc_type not in ["solved", "alphafold"]:
         log.error(
-            f"--struc_type flag invalid, must be solved or alphafold. Found {args.struc_type}"
+            f"Error: --struc_type {args.struc_type} is invalid, must be either 'solved' or 'alphafold'"
         )
-        sys.exit(0)
+        sys.exit(1)
 
     if (
         (args.pdb_dir and args.list_file)
@@ -193,21 +194,19 @@ def check_valid_input(args):
         or (args.list_file and args.pdb_or_zip_file)
     ):
         log.error(
-            f"Please choose only one of flags: pdb_dir, list_file or pdb_or_zip_file"
+            f"Error: Please choose only one input option: pdb_dir, list_file or pdb_or_zip_file"
         )
         print(args)
-        sys.exit(0)
-
-    if args.pdb_dir and args.pdb_or_zip_file:
-        log.error(f"Both pdb_dir and list_file flags set, please chooose one")
-        sys.exit(0)
+        sys.exit(1)
 
     # Check ZIP max-size, number of files
     if args.pdb_or_zip_file:
         size_mb = os.stat(args.pdb_or_zip_file).st_size / (1024 * 1024)
         if size_mb > MAX_FILES:
-            log.error(f"Max file-size {MAX_FILE_SIZE_MB} MB, found {round(size_mb)} MB")
-            sys.exit(0)
+            log.error(
+                f"Error: Max file-size {MAX_FILE_SIZE_MB} MB, found {round(size_mb)} MB"
+            )
+            sys.exit(1)
 
         if true_if_zip(args.pdb_or_zip_file):
             with closing(ZipFile(args.pdb_or_zip_file)) as archive:
@@ -216,27 +215,29 @@ def check_valid_input(args):
 
             # Check number of files in zip
             if file_count > MAX_FILES:
-                log.error(f"Max number of files {file_count}, found {file_count}")
-                sys.exit(0)
+                log.error(
+                    f"Error: Max number of files {file_count}, found {file_count}"
+                )
+                sys.exit(1)
 
             # Check filenames end in .pdb
             name = file_names[0]
             if os.path.splitext(name)[-1] != ".pdb":
                 log.error(
-                    f"Ensure all ZIP content file-names end in .pdb, found {name}"
+                    f"Error: Ensure all ZIP content file-names end in .pdb, found {name}"
                 )
-                sys.exit(0)
+                sys.exit(1)
 
     # Check XGBoost models present
     models = glob.glob(f"{args.models_dir}/XGB_*_of_*.json")
     if len(models) != 100:
         log.error(
-            f"ERROR: Found {len(models)}/100 XGBoost model JSON files in {args.models_dir}"
+            f"Error: Found {len(models)}/100 XGBoost model JSON files in {args.models_dir}"
         )
         log.error(
             f"Did you unzip the models.zip file? models/ should contain XGB_n_of_100.json files"
         )
-        sys.exit(0)
+        sys.exit(1)
 
 
 def true_if_zip(infile):
@@ -339,6 +340,10 @@ def predict_and_save(models, dataset, pdb_dir, out_dir, verbose: int = 0) -> Non
     )
     df_all.insert(3, "DiscoTope-3.0_score", y_all)
 
+    # Round numerical columns to 5 digits for nicer CSV output
+    num_cols = ["DiscoTope-3.0_score", "rsa"]
+    df_all[num_cols] = df_all[num_cols].applymap(lambda x: "{:.5f}".format(x))
+
     # Keep track of structures for later
     strucs_all = [
         dataset[i]["PDB_biotite"]
@@ -370,105 +375,23 @@ def predict_and_save(models, dataset, pdb_dir, out_dir, verbose: int = 0) -> Non
         )
         sys.exit(1)
 
-    # Save predictions
+    # Fetch pre-computed predictions by PDB lengths, save to CSV/PDB
     start = 0
     for _pdb, L, struc in zip(pdbids_all, X_lens, strucs_all):
         log.info(f"Saving predictions for {_pdb} to {out_dir}")
+
         end = start + L
         df = df_all.iloc[start:end]
         start = end
 
-        # Save DF
+        # Save CSV
         outfile = f"{out_dir}/{_pdb}_discotope3.csv"
         df.to_csv(outfile, index=False)
 
-        # Add scores to PDB
+        # Save PDB, after adding prediction scores
         struc_pred = set_struc_res_bfactor(struc, df["DiscoTope-3.0_score"].values)
-
-        # Save PDB
         outfile = f"{out_dir}/{_pdb}_discotope3.pdb"
         strucio.save_structure(outfile, struc_pred)
-
-
-def write_model_prediction_csvs_pdbs(
-    models, dataset, pdb_dir, out_dir, verbose: int = 0
-) -> None:
-    """Calculates predictions for dataset PDBs, saves output .csv and .pdb files"""
-
-    for i, sample in enumerate(dataset):
-        try:
-            # Predict on antigen features
-            y_hat = predict_using_models(models, sample["X_arr"])
-            sample["y_hat"] = y_hat * 100
-
-            # Output CSV
-            df_out = sample["df_stats"]
-            df_out.insert(3, "DiscoTope-3.0_score", y_hat)
-
-            # Round to 5 digits
-            num_cols = ["DiscoTope-3.0_score", "rsa"]
-            df_out[num_cols] = df_out[num_cols].applymap(lambda x: "{:.5f}".format(x))
-
-            # Write to CSV
-            outfile = f"{out_dir}/{sample['pdb_id']}_discotope3.csv"
-            if verbose:
-                log.info(
-                    f"Writing {sample['pdb_id']} ({i+1}/{len(dataset)}) to {outfile}"
-                )
-            df_out.to_csv(outfile, index=False)
-
-        except Exception as E:
-            log.error(
-                f"PDB {sample['pdb_id']} {i+1}/{len(dataset)}: Unable to write predictions CSV: {E}"
-            )
-            traceback.print_exc()
-
-        try:
-            # Set B-factor field to DiscoTope-3.0 score
-            atom_array = sample["PDB_biotite"]
-            values = sample["y_hat"]
-            # target_values = ((values - values.min()) / (values.max() - values.min())) * 100
-
-            # Get relative indices starting from 1. Copy to avoid modifying original
-            atom_array_renum = biotite.structure.renumber_res_ids(
-                copy.deepcopy(atom_array), start=1
-            )
-            atom_array.b_factor = values[atom_array_renum.res_id - 1]
-
-            # Write PDB
-            outfile = f"{out_dir}/{sample['pdb_id']}_discotope3.pdb"
-            if verbose:
-                log.info(
-                    f"Writing {sample['pdb_id']} ({i+1}/{len(dataset)}) to {outfile}"
-                )
-
-            strucio.save_structure(outfile, atom_array)
-
-            """
-            HEADER_INFO = ("HEADER", "TITLE", "COMPND", "SOURCE")
-            pdb_path = f"{pdb_dir}/{sample['pdb_id']}.pdb"
-            # pdb_path = f"{out_dir.rsplit('/',1)[0]}/download/{sample['pdb_id']}.pdb"
-
-            header = list()
-            with open(pdb_path, "r") as f:
-                for line in f:
-                    if line.startswith(HEADER_INFO):
-                        header.append(line.strip())
-                    else:
-                        break
-
-            with open(outfile, "r+") as f:
-                content = f.read()
-                f.seek(0, 0)
-                print(*header, sep="\n", file=f)
-                f.write(content)
-            """
-
-        except Exception as E:
-            log.error(
-                f"PDB {sample['pdb_id']} {i+1}/{len(dataset)}: Unable to write predictions PDB: {E}"
-            )
-            traceback.print_exc()
 
 
 def save_pdb(pdb_path, pdb_name, bscore, outdir):
@@ -554,13 +477,13 @@ def fetch_and_process_from_list_file(list_file, out_dir):
         pdb_list = sorted(set([line.strip() for line in f.readlines()]))
 
     if len(pdb_list) == 0:
-        log.error("No IDs found in list.")
-        sys.exit(0)
+        log.error("Error: No IDs found in PDB list.")
+        sys.exit(1)
     elif len(pdb_list) > MAX_FILES:
         log.error(
-            f"A maximum of {MAX_FILES} PDB IDs can be processed at one time ({len(pdb_list)} IDs found)."
+            f"Error: A maximum of {MAX_FILES} PDB IDs can be processed at one time. ({len(pdb_list)} IDs found)."
         )
-        sys.exit(0)
+        sys.exit(1)
 
     for i, prot_id in enumerate(pdb_list):
         if os.path.exists(f"{out_dir}/{prot_id}.pdb"):
@@ -579,35 +502,35 @@ def fetch_and_process_from_list_file(list_file, out_dir):
             URL = f"https://files.rcsb.org/download/{prot_id}.pdb"
             bscore = 100
         else:
-            log.error(f"Structure ID was of unknown type {args.struc_type}")
-            sys.exit(0)
+            log.error(f"Error: Structure ID is of unknown type {args.struc_type}")
+            sys.exit(1)
 
         response = requests.get(URL)
         if response.status_code == 200:
             with open(f"{out_dir}/temp", "wb") as f:
                 f.write(response.content)
         elif response.status_code == 404:
-            log.error(f"File with the ID {prot_id} could not be found (url: {URL}).")
-            log.error("Maybe you selected the wrong ID type or misspelled the ID.")
             log.error(
-                "Note that pdb files may not exist in RCSB for large structures - sorry for the inconvenience."
+                f"Error: File with the ID {prot_id} could not be found (url: {URL})."
             )
-            sys.exit(0)
+            log.error("Maybe you selected the wrong ID type or misspelled the ID.")
+            log.error("Note that pdb files may not exist in RCSB for large structures.")
+            sys.exit(1)
         elif response.status_code in (408, 504):
             log.error(
-                f"Request timed out with error code {response.status_code} (url: {URL})."
+                f"Error: Request timed out with error code {response.status_code} (url: {URL})."
             )
             log.error(
                 """Try to download the structure(s) locally from the given database and upload as pdb or zip.
                 Bulk download script: https://www.rcsb.org/docs/programmatic-access/batch-downloads-with-shell-script
                 """
             )
-            sys.exit(0)
+            sys.exit(1)
         else:
             log.error(
-                f"Received status code {response.status_code}, when trying to fetch file from {URL}"
+                f"Error: Received status code {response.status_code}, when trying to fetch file from {URL}"
             )
-            sys.exit(0)
+            sys.exit(1)
 
         save_pdb(
             pdb_path=f"{out_dir}/temp", pdb_name=prot_id, bscore=bscore, outdir=out_dir
@@ -632,41 +555,40 @@ def get_directory_basename_dict(directory: str, glob_ext: str) -> dict:
     return {get_basename_no_ext(fp): fp for fp in dir_list}
 
 
-def check_missing_pdb_csv_files(in_dir, out_dir) -> None:
+def check_missing_output_files(in_dir, out_dir) -> None:
     """Reports missing CSV and PDB file in out_dir, per PDB file in in_dir"""
 
-    pass
+    in_pdbs = glob.glob(f"{in_dir}/*.pdb")
+    out_pdbs = glob.glob(f"{out_dir}/*.pdb")
 
-    # Get basenames of input PDBs and output PDB/CSV files
-    # in_pdb_dict = get_directory_basename_dict(in_dir, "*.pdb")
-    out_dict = get_directory_basename_dict(out_dir, "*.[pdb|csv]*")
+    in_dict = {Path(pdb).stem: pdb for pdb in in_pdbs}
+    out_dict = {re.sub(r"_discotope3$", "", Path(pdb).stem): pdb for pdb in out_pdbs}
 
-    # Remove _discotope3 extension before comparison
-    out_dict = {re.sub(r"_[A-Za-z]_discotope3$", "", k): v for k, v in out_dict.items()}
-
-    # Log which input files are not found in output
-    # missing_pdbs = in_pdb_dict.keys() - out_dict.keys()
-    # if len(missing_pdbs) > 0:
-    #    log.error(f"INFO: Failed processing PDBs: {', '.join(list(missing_pdbs))}")
+    missing_pdbs = in_dict.keys() - out_dict.keys()
+    if len(missing_pdbs) >= 1:
+        log.error(
+            f"Error: Missing predictions for the following PDB(s) (check error log):\n{', '.join(missing_pdbs)}"
+        )
 
 
-def zip_folder_timeout(in_dir, out_dir) -> str:
+def zip_folder_timeout(in_dir, out_dir, timeout_seconds=60) -> str:
     """Zips in_dir, writes to out_dir, returns zip file"""
 
     timestamp = time.strftime("%Y%m%d%H%M")
     file_name = f"discotope3_{timestamp}.zip"
     zip_path = f"{out_dir}/{file_name}"
-    bashCommand = f"zip -j {zip_path} {in_dir}/*.pdb {in_dir}/*.csv || exit"
+    bashCommand = f"zip -j {zip_path} {in_dir}/log.txt {in_dir}/*.pdb {in_dir}/*.csv || exit"
 
     try:
         output = subprocess.run(
-            bashCommand, timeout=20, capture_output=True, shell=True
+            bashCommand, timeout=timeout_seconds, capture_output=True, shell=True
         )
         log.info(output.stdout.decode())
         return file_name
+        
     except subprocess.TimeoutExpired:
         log.error("Error: zip compression timed out")
-        sys.exit(0)
+        sys.exit(1)
 
 
 def main(args):
@@ -723,21 +645,13 @@ def main(args):
         )
         if len(dataset) == 0:
             log.error("Error: No PDB files were valid.")
-            sys.exit(0)
+            sys.exit(1)
 
         # Load pre-trained XGBoost models
         models = load_models(args.models_dir, num_models=100)
 
-        # Predict all PDBs, save to CSV and PDB files
-        # predict_and_save(
-        #    models,
-        #    dataset,
-        #    input_chains_dir,
-        #    out_dir=f"{args.out_dir}/output",
-        #    verbose=args.verbose,
-        # )
-
-        write_model_prediction_csvs_pdbs(
+        # Predict and save
+        predict_and_save(
             models,
             dataset,
             input_chains_dir,
@@ -745,12 +659,11 @@ def main(args):
             verbose=args.verbose,
         )
 
-        # Check which files failed
-        # check_missing_pdb_csv_files(input_chains_dir, f"{args.out_dir}/output")
-        # log.info(f"Done!")
+        # Print if any PDB outputs are missing
+        check_missing_output_files(input_chains_dir, f"{args.out_dir}/output")
 
+        # If web server mode, print HTML and zip output folder
         if args.web_server_mode:
-            # Zip output folder
             log.info(f"Compressing ZIP file")
             out_zip = zip_folder_timeout(
                 in_dir=f"{args.out_dir}/output", out_dir=f"{args.out_dir}/output"
@@ -779,25 +692,30 @@ def main(args):
             )
 
             for i, sample in enumerate(dataset):
-                out_pdb = f"{web_prefix}/{sample['pdb_id']}_discotope3.pdb"
-                out_csv = f"{web_prefix}/{sample['pdb_id']}_discotope3.csv"
+                # Only include present PDBs
+                if not type(sample["X_arr"]):
+                    continue
 
-                examples += "{"
-                examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/{out_pdb}',info:'Structure {i+1}'"
-                examples += "},"
-                structures += "`"
-                with open(
-                    f"{args.out_dir}/output/{sample['pdb_id']}_discotope3.pdb", "r"
-                ) as f:
-                    structures += f.read()
-                structures += "`,"
+                else:
+                    out_pdb = f"{web_prefix}/{sample['pdb_id']}_discotope3.pdb"
+                    out_csv = f"{web_prefix}/{sample['pdb_id']}_discotope3.csv"
 
-                style = ' style="margin-top:1em;"' if i > 0 else ""
-                print(f"<h3{style}>{sample['pdb_id']}</h3>")
-                print(
-                    f'<a href="/{out_pdb}"><span>Download PDB w/ DiscoTope-3.0 prediction scores</span></a>'
-                )
-                print(f'<a href="/{out_csv}"><span>Download CSV</span></a> <br>')
+                    examples += "{"
+                    examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/{out_pdb}',info:'Structure {i+1}'"
+                    examples += "},"
+                    structures += "`"
+                    with open(
+                        f"{args.out_dir}/output/{sample['pdb_id']}_discotope3.pdb", "r"
+                    ) as f:
+                        structures += f.read()
+                    structures += "`,"
+
+                    style = ' style="margin-top:1em;"' if i > 0 else ""
+                    print(f"<h3{style}>{sample['pdb_id']}</h3>")
+                    print(
+                        f'<a href="/{out_pdb}"><span>Download PDB w/ DiscoTope-3.0 prediction scores</span></a>'
+                    )
+                    print(f'<a href="/{out_csv}"><span>Download CSV</span></a> <br>')
 
             print("</div></div></div>")
             examples += "];</script>"
@@ -808,14 +726,17 @@ def main(args):
 
 if __name__ == "__main__":
     args = cmdline_args()
-    os.makedirs(f"{args.out_dir}/output", exist_ok=True)
+    os.makedirs(f"{args.out_dir}/output/", exist_ok=True)
 
+    log_path = os.path.abspath(f"{args.out_dir}/output/log.txt")
     logging.basicConfig(
-        filename=f"{args.out_dir}/output/dt3.log",
-        encoding="utf-8",
         level=logging.ERROR,
         format="[{asctime}] {message}",
         style="{",
+        handlers=[
+            logging.FileHandler(filename=log_path, mode="w"),
+            logging.StreamHandler(stream=sys.stdout),
+        ],
     )
     log = logging.getLogger(__name__)
 

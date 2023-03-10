@@ -8,7 +8,8 @@ sys.path.insert(0, "ROOT_PATH")
 
 import logging
 
-logging.basicConfig(level=logging.ERROR, format="[{asctime}] {message}", style="{")
+# Nb: assume logging is already configured in main script
+# logging.basicConfig(level=logging.ERROR, format="[{asctime}] {message}", style="{")
 log = logging.getLogger(__name__)
 
 import copy
@@ -18,14 +19,10 @@ import traceback
 from argparse import ArgumentParser, RawTextHelpFormatter
 from typing import List
 
-import Bio
 import biotite.structure
 import numpy as np
 import pandas as pd
-import prody
 import torch
-from Bio import SeqIO
-
 # Use Sander values instead
 from biotite.structure import filter_backbone, get_chains
 from biotite.structure.io import pdb, pdbx
@@ -66,7 +63,6 @@ def cmdline_args():
     usage = f"""
     # Make dataset with test set
     python src/data/make_dataset.py \
-    --fasta data/raw/external_testset_bp3.fasta \
     --pdb_dir data/raw/af2_pdbs \
     --out_dir data/processed/test__1
     """
@@ -86,14 +82,6 @@ def cmdline_args():
         "--struc_type",
         required=True,
         help="Type of PDB structure (solved | alphafold)",
-    )
-
-    p.add_argument(
-        "--fasta",
-        required=True,
-        help="Input FASTA file, may contain epitopes in uppercase",
-        metavar="FILE",
-        type=lambda x: is_valid_path(p, x),
     )
     p.add_argument(
         "--out_dir",
@@ -146,7 +134,7 @@ def load_IF1_tensors(
     check_existing=True,
     save_embeddings=True,
     max_gpu_pdb_length: int = 1000,
-    verbose: int = 1,
+    verbose: int = 0,
 ) -> List:
     """Generate or load ESM-IF1 embeddings for a list of PDB files"""
 
@@ -190,6 +178,7 @@ def load_IF1_tensors(
                     if torch.cuda.is_available() and len(seq) < max_gpu_pdb_length
                     else "cpu"
                 )
+
                 rep = (
                     esm_util_custom.get_encoder_output(
                         model, alphabet, coords, seq, device=device
@@ -207,10 +196,13 @@ def load_IF1_tensors(
             list_sequences.append(seq)
 
         except Exception as E:
-            log.error(f"Unable to embed {_pdb}: {E}")
-            import traceback
+            log.error(
+                f"Error: Biotite/ESM-IF1 unable to process chain {_pdb}. No present amino-acid backbone atoms?"
+            )
 
-            traceback.print_exc()
+            if verbose >= 1:
+                traceback.print_exc()
+
             list_IF1_tensors.append(False)
             list_structures.append(False)
             list_sequences.append(False)
@@ -304,42 +296,9 @@ def convert_resid_to_relative(res_id: np.ndarray) -> np.array:
     return rel_idxs
 
 
-def save_fasta_from_pdbs(pdb_dir: str, out_dir: str):
-    """Reads in sequences from PDBs from pdb_dir, saves as pdbs.fasta in out_dir"""
-
-    def prody_read_seq(pdb_path: str):
-        """Reads sequence from PDB, based on carbon-alpha atoms"""
-
-        structure = prody.parsePDB(pdb_path, subset="ca")
-
-        for chain in np.unique(structure.getChids()):
-            seq = structure[chain].getSequence()
-            yield chain, seq
-
-    pdbs = list(Path(pdb_dir).glob("*.pdb"))
-    fasta_dict = {}
-
-    for pdb_path in pdbs:
-        pdb = os.path.splitext(os.path.basename(pdb_path))[0]
-
-        for chain, seq in prody_read_seq(str(pdb_path)):
-            id = f"{pdb}_{chain}"
-
-            fasta_dict[id] = SeqIO.SeqRecord(
-                Bio.Seq.Seq(seq), id=id, name=id, description=id
-            )
-
-    # write FASTA
-    outfile = f"{out_dir}/pdbs.fasta"
-    log.info(f"Writing {len(fasta_dict)} FASTA entries to {outfile}")
-    with open(outfile, "w") as out_handle:
-        SeqIO.write(fasta_dict.values(), out_handle, "fasta")
-
-
 def embed_pdbs_IF1(
     pdb_dir: str,
     out_dir: str,
-    input_fasta: 'dict[str, "Bio.SeqRecord.SeqRecord"]',
     struc_type: str,
     overwrite_embeddings=False,
     max_gpu_pdb_length: int = 1000,
@@ -349,16 +308,12 @@ def embed_pdbs_IF1(
     Embeds a directory of PDBs using IF1, either solved or AF2 structures (uses confidence)
 
     Input:
-        pdb_dir: Folder with PDB files matching PDB ids in input_fasta,
-                globbed with *.pdb. Must specify whether they are solved or predicted
+        pdb_dir: Folder with PDB files globbed with *.pdb
         out_dir: Directory to save tensor files
-        input_fasta: FASTA dictionary containing PDB ids as keys (e.g. 4akj_C), used to select which
-                PDBs to embed
         struc_type: Solved for experimental PDBs (RCSB), "alphafold" for AlphaFold PDBs (alphafolddb)
         overwrite_embeddings: Overwrites previously computed tensor files if True
     Output:
         (None): Saves torch tensor .pt files with per-residue embeddings
-
     """
 
     import esm
@@ -402,6 +357,7 @@ def embed_pdbs_IF1(
 
             # Embed on CPU if PDB is too large (>= 1000 residues)
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
             if len(seq) >= max_gpu_pdb_length:
                 device = "cpu"
 
@@ -538,8 +494,8 @@ def structure_extract_seq_residx_bfac_rsas_diam(struc_full, chain_id):
 
 class Discotope_Dataset_web(torch.utils.data.Dataset):
     """
-    Creates pre-processed torch Dataset from input FASTA dict and directories with PDBs and IF-1 tensors
-    Note: FASTA IDs, PDB filenames and ESM-IF1 tensor names must be shared!
+    Creates pre-processed torch Dataset directories with PDBs and IF1 tensors
+    Note: PDB filenames and ESM-IF1 tensor names must be shared!
 
     Samples (antigens) are returned as dict, with keys X_arr, y_arr, length, pLDDT, feature_idxs etc ...
     X_arr is a torch tensor with features corresponding to (available from features_idxs key):
@@ -550,7 +506,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
     - 534:535 = Residue RSA, extracted using DSSP on Alphafold2 model (1)
 
     Args:
-        pdb_dir: Directory with PDBs, shared IDs are FASTA IDs
+        pdb_dir: Directory with PDBs
         preprocess: Set to True to pre-process samples (True)
         n_jobs: Parallelize pre-processing across n cores (1)
 
@@ -661,7 +617,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
         return results
 
     def process_sample(self, idx):
-        """Process individual pdb, fasta sequence, ESM"""
+        """Process individual pdb, sequence, ESM"""
 
         if torch.is_tensor(idx):
             idx = idx.tolist()
@@ -677,8 +633,12 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
             struc_full = self.list_structures[idx]
             seq = self.list_sequences[idx]
 
-            if not type(IF1_tensor) or not type(struc_full):
-                log.error(f"Failed to embed {pdb_id}, skipping ...")
+            if (
+                type(IF1_tensor) is bool
+                or type(struc_full) is bool
+                or type(seq) is bool
+            ):
+                log.info(f"Previously failed to pre-process {pdb_id}, skipping ...")
                 return False
 
             seq_onehot = self.one_hot_encode_sequence(seq)
@@ -754,8 +714,9 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
             return output_dict
 
         except Exception as E:
-            log.error(f"Error processing PDB id {pdb_id}, from {pdb_fp}: {E}")
+            log.error(f"Error processing chain {pdb_id}: {E}")
             traceback.print_exc()
+
             return False
 
     def __len__(self):
@@ -776,29 +737,12 @@ def main(args):
     # Make sure output directories exist
     os.makedirs(args.out_dir, exist_ok=True)
 
-    if args.fasta:
-        if os.path.exists(args.fasta):
-            log.info(f"Using provided FASTA file: {args.fasta}")
-            input_fasta = args.fasta
-    else:
-        log.info(f"Creating FASTA file from PDB sequences: {args.out_dir}/pdbs.fasta")
-        save_fasta_from_pdbs(args.pdb_dir, args.out_dir)
-        input_fasta = f"{args.out_dir}/pdbs.fasta"
-
-    # Load provided/created FASTA file and write again to args.out_dir
-    fasta_dict = SeqIO.to_dict(SeqIO.parse(input_fasta, "fasta"))
-    log.info(f"Read {len(fasta_dict)} entries from {input_fasta}")
-
-    with open(f"{args.out_dir}/pdbs.fasta", "w") as out_handle:
-        SeqIO.write(fasta_dict.values(), out_handle, "fasta")
-
     if not args.skip_embeddings:
         log.info(f"Loading ESM-IF1 to embed PDBs")
         embed_pdbs_IF1(
             args.pdb_dir,
             out_dir=args.pdb_dir,
             struc_type=args.struc_type,
-            input_fasta=fasta_dict,
             overwrite_embeddings=args.overwrite_embeddings,
             max_gpu_pdb_length=args.max_gpu_pdb_length,
             verbose=args.verbose,
@@ -806,7 +750,7 @@ def main(args):
 
     log.info(f"Pre-processing PDBs")
     dataset = Discotope_Dataset_web(
-        fasta_dict, args.pdb_dir, IF1_dir=args.pdb_dir, verbose=args.verbose
+        pdb_dir=args.pdb_dir, structure_type=args.struc_type, verbose=args.verbose
     )
     log.info(
         f"Writing processed dataset ({len(dataset)} samples) to {f'{args.out_dir}/dataset.pt'}"
