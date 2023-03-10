@@ -143,7 +143,6 @@ def get_encoder_output(model, alphabet, coords, seq, device="cpu"):
 
 # MH
 def get_decoder_output(model, alphabet, coords, seq, features_only=True):
-
     # CUDA #MH
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -218,7 +217,7 @@ def rbf(values, v_min, v_max, n_bins=16):
     rbf_std = (v_max - v_min) / n_bins
     # v_expand = torch.unsqueeze(values, -1)
     z = (values.unsqueeze(-1) - rbf_centers) / rbf_std
-    return torch.exp(-(z ** 2))
+    return torch.exp(-(z**2))
 
 
 def norm(tensor, dim, eps=1e-8, keepdim=False):
@@ -237,9 +236,10 @@ def normalize(tensor, dim=-1):
 
 class CoordBatchConverter(BatchConverter):
     def __call__(
-        self, raw_batch: Sequence[Tuple[Sequence, str]], device=None,
+        self,
+        raw_batch: Sequence[Tuple[Sequence, str]],
+        device=None,
     ):
-
         """
         Args:
             raw_batch: List of tuples (coords, confidence, seq)

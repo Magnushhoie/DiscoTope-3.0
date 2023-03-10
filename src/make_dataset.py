@@ -1,6 +1,6 @@
 # ROOT_Path
-import sys
 import os
+import sys
 from pathlib import Path
 
 ROOT_PATH = str(Path(os.getcwd()))
@@ -11,6 +11,7 @@ import logging
 logging.basicConfig(level=logging.ERROR, format="[{asctime}] {message}", style="{")
 log = logging.getLogger(__name__)
 
+import copy
 import glob
 import re
 import traceback
@@ -24,10 +25,8 @@ import pandas as pd
 import prody
 import torch
 from Bio import SeqIO
+
 # Use Sander values instead
-from Bio.Data.PDBData import residue_sasa_scales
-from Bio.SeqUtils import seq1
-from biotite.sequence import ProteinSequence
 from biotite.structure import filter_backbone, get_chains
 from biotite.structure.io import pdb, pdbx
 from biotite.structure.residues import get_residues
@@ -35,11 +34,31 @@ from joblib import Parallel, delayed
 
 import esm_util_custom
 
-residue_max_acc_1seq = {
-    seq1(aa): residue_sasa_scales["Sander"][aa]
-    for aa, val in residue_sasa_scales["Sander"].items()
+# Sander scale residue SASA values
+# from Bio.Data.PDBData import residue_sasa_scales
+sasa_max_dict = {
+    "A": 106.0,
+    "R": 248.0,
+    "N": 157.0,
+    "D": 163.0,
+    "C": 135.0,
+    "Q": 198.0,
+    "E": 194.0,
+    "G": 84.0,
+    "H": 184.0,
+    "I": 169.0,
+    "L": 164.0,
+    "K": 205.0,
+    "M": 188.0,
+    "F": 197.0,
+    "P": 136.0,
+    "S": 130.0,
+    "T": 142.0,
+    "W": 227.0,
+    "Y": 222.0,
+    "V": 142.0,
+    "X": 169.55,  # Use mean for non-standard residues
 }
-sasa_max_dict = residue_max_acc_1seq
 
 
 def cmdline_args():
@@ -52,7 +71,9 @@ def cmdline_args():
     --out_dir data/processed/test__1
     """
     p = ArgumentParser(
-        description="Make dataset", formatter_class=RawTextHelpFormatter, usage=usage,
+        description="Make dataset",
+        formatter_class=RawTextHelpFormatter,
+        usage=usage,
     )
 
     def is_valid_path(parser, arg):
@@ -75,7 +96,10 @@ def cmdline_args():
         type=lambda x: is_valid_path(p, x),
     )
     p.add_argument(
-        "--out_dir", required=True, help="Job output directory", metavar="FOLDER",
+        "--out_dir",
+        required=True,
+        help="Job output directory",
+        metavar="FOLDER",
     )
     p.add_argument(
         "--pdb_dir",
@@ -91,6 +115,12 @@ def cmdline_args():
         required=False,
         help="Path for saving XGBoost models",
         metavar="FOLDER",
+    )
+    p.add_argument(
+        "--max_gpu_pdb_length",
+        type=int,
+        help="Maximum PDB length to embed on GPU (1000), otherwise CPU",
+        default=1000,
     )
     p.add_argument(
         "--skip_embeddings",
@@ -112,7 +142,11 @@ def cmdline_args():
 
 
 def load_IF1_tensors(
-    pdb_files: List, check_existing=True, save_embeddings=True, verbose: int = 1,
+    pdb_files: List,
+    check_existing=True,
+    save_embeddings=True,
+    max_gpu_pdb_length: int = 1000,
+    verbose: int = 1,
 ) -> List:
     """Generate or load ESM-IF1 embeddings for a list of PDB files"""
 
@@ -128,7 +162,6 @@ def load_IF1_tensors(
     list_structures = []
     list_sequences = []
     for i, pdb_path in enumerate(pdb_files):
-
         _pdb = get_basename_no_ext(pdb_path)
 
         try:
@@ -151,9 +184,11 @@ def load_IF1_tensors(
             else:
                 log.info(f"{i+1} / {len(pdb_files)}: Embedding {_pdb}")
 
-                # Embed on CPU if PDB is too large
+                # Embed on CPU if PDB is too large (>= 1000 residues)
                 device = torch.device(
-                    "cuda" if torch.cuda.is_available() and len(seq) < 1000 else "cpu"
+                    "cuda"
+                    if torch.cuda.is_available() and len(seq) < max_gpu_pdb_length
+                    else "cpu"
                 )
                 rep = (
                     esm_util_custom.get_encoder_output(
@@ -208,9 +243,7 @@ def load_structure_discotope(fpath, chain=None):
                 pdbf = pdb.PDBFile.read(fin)
                 structure_full = pdbf.get_structure(model=1, extra_fields=["b_factor"])
             except Exception as E:
-                log.info(
-                    f"Unable to read PDB file {fpath}: {E}"
-                )
+                log.info(f"Unable to read PDB file {fpath}: {E}")
 
     bbmask = filter_backbone(structure_full)
     structure = structure_full[bbmask]
@@ -309,6 +342,7 @@ def embed_pdbs_IF1(
     input_fasta: 'dict[str, "Bio.SeqRecord.SeqRecord"]',
     struc_type: str,
     overwrite_embeddings=False,
+    max_gpu_pdb_length: int = 1000,
     verbose: int = 1,
 ) -> None:
     """
@@ -366,9 +400,9 @@ def embed_pdbs_IF1(
             if verbose:
                 log.info(f"PDB {pdb}, IF1: {len(seq)} residues")
 
-            # Check whether to put on GUP
+            # Embed on CPU if PDB is too large (>= 1000 residues)
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            if len(seq) >= 1000:
+            if len(seq) >= max_gpu_pdb_length:
                 device = "cpu"
 
             # Save representation to file
@@ -384,13 +418,59 @@ def embed_pdbs_IF1(
     )
 
 
+def map_3letter_to_1letter(res_names: np.array):
+    """Maps 3-letter to 1-letter residue names, with "X" for unknown residues."""
+
+    mapping = {
+        "ALA": "A",
+        "CYS": "C",
+        "ASP": "D",
+        "GLU": "E",
+        "PHE": "F",
+        "GLY": "G",
+        "HIS": "H",
+        "ILE": "I",
+        "LYS": "K",
+        "LEU": "L",
+        "MET": "M",
+        "ASN": "N",
+        "PRO": "P",
+        "GLN": "Q",
+        "ARG": "R",
+        "SER": "S",
+        "THR": "T",
+        "VAL": "V",
+        "TRP": "W",
+        "TYR": "Y",
+    }
+
+    # Map 3-letter to 1-letter residue names
+    seq = pd.Series(res_names).map(mapping, na_action="ignore").values
+
+    # Map unkonwn residues to 'X'
+    seq[pd.isna(seq)] = "X"
+
+    # Check for mismatches
+    if "X" in np.unique(seq):
+        idxs = np.where(seq == "X")[0]
+        unknown_res = np.unique(res_names[idxs])
+        log.info(f"Unknown residues found in PDB: {unknown_res}")
+
+    return seq
+
+
 def get_atomarray_seq_residx(
     atom_array: biotite.structure.AtomArray,
 ) -> "tuple[str, np.ndarray]":
-    """Returns sequence and residue indices for an atom array"""
+    """
+    Returns sequence and residue indices for an atom array
+    """
 
+    # Get residue indices and 3-letter encoding
     res_idxs, res_names = get_residues(atom_array)
-    seq = "".join([ProteinSequence.convert_letter_3to1(r) for r in res_names])
+
+    # Maps 3-letter to 1-letter residue names, unknown to X
+    seq = map_3letter_to_1letter(res_names)
 
     return seq, res_idxs
 
@@ -412,8 +492,10 @@ def get_atomarray_bfacs(atom_array: biotite.structure.AtomArray) -> np.array:
     Return per-residue B-factors (AF2 confidence) from biotite.structure.AtomArray
     """
 
-    # Temporary renumber for relative indices starting from 1
-    atom_array_renum = biotite.structure.renumber_res_ids(atom_array, start=1)
+    # Get relative indices starting from 1. Copy to avoid modifying original
+    atom_array_renum = biotite.structure.renumber_res_ids(
+        copy.deepcopy(atom_array), start=1
+    )
 
     # Extract B-factors, map to residues
     res_idxs_dict = {r: i for i, r in enumerate(atom_array_renum.res_id)}
@@ -441,10 +523,15 @@ def structure_extract_seq_residx_bfac_rsas_diam(struc_full, chain_id):
     seq, res_idxs = get_atomarray_seq_residx(struc_full)
     bfacs = get_atomarray_bfacs(struc_full)
 
-    # Convert sasa to rsa
+    # Convert SASA to RSA with Sander scale max values
     sasa = get_atomarray_res_sasa(struc_full)
-    div_values = [sasa_max_dict[aa] for aa in seq.upper()]
+    div_values = [sasa_max_dict[aa] for aa in seq]
     rsa = sasa / div_values
+
+    if len(rsa) != len(seq):
+        log.error(
+            f"ERROR: RSA values {len(rsa)} do not match length of backbone residues {len(seq)}"
+        )
 
     return seq, res_idxs, bfacs, rsa
 
@@ -490,16 +577,17 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
         check_existing: bool = False,  # Try to load previous embedding files
         save_embeddings: bool = False,  # Save new embedding files
         preprocess: bool = True,
+        max_gpu_pdb_length: int = 1000,
         n_jobs: int = 1,
         verbose: int = 0,
     ) -> torch.utils.data.Dataset:
-
         self.verbose = verbose
         self.n_jobs = n_jobs
         self.preprocess = preprocess
         self.structure_type = structure_type
         self.check_existing = check_existing
         self.save_embeddings = save_embeddings
+        self.max_gpu_pdb_length = max_gpu_pdb_length
 
         # Get PDB path dict
         self.list_pdb_files = glob.glob(f"{pdb_dir}/*.pdb")
@@ -510,7 +598,6 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
         log.info(f"Read {len(self.list_pdb_files)} PDBs from {pdb_dir}")
 
         if self.preprocess:
-
             # Read in IF1 tensors
             (
                 self.list_IF1_tensors,
@@ -520,6 +607,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
                 self.list_pdb_files,
                 check_existing=self.check_existing,
                 save_embeddings=self.save_embeddings,
+                max_gpu_pdb_length=self.max_gpu_pdb_length,
             )
 
             # Remaining pre-processing
@@ -535,12 +623,21 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
             log.error(f"Must pre-process Discotope_Dataset")
             sys.exit()
 
-    def one_hot_encode(self, seq: str):
-        """One-hot encodes amino-acids to 20 dims"""
+    def one_hot_encode_sequence(self, seq: str):
+        """One-hot encodes amino-acid sequence to 20 dims. Uses full 0 for unkown amino-acids"""
         seq = seq.upper()
-        mapping = dict(zip("ACDEFGHIKLMNPQRSTVWY", range(20)))
-        seq2 = [mapping[aa] for aa in seq]
-        return np.eye(20)[seq2]
+
+        # Mapping to 21 dimensions, but the last will be excluded
+        mapping = dict(zip("ACDEFGHIKLMNPQRSTVWYX", range(21)))
+
+        # Map X and unknown to index 20 (last index in range 21)
+        seq2 = [mapping.get(aa, 21 - 1) for aa in seq]
+
+        # 21 dim one-hot -> 20 dim by excluding "X"
+        oh = np.eye(21)[seq2]
+        oh = oh[:, 0:20]
+
+        return oh
 
     def one_hot_decode(self, one_hot):
         """De-codes one-hot encded sequences from 20 dims"""
@@ -579,15 +676,14 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
             IF1_tensor = self.list_IF1_tensors[idx]
             struc_full = self.list_structures[idx]
             seq = self.list_sequences[idx]
-            seq_onehot = self.one_hot_encode(seq)
+
+            if not type(IF1_tensor) or not type(struc_full):
+                log.error(f"Failed to embed {pdb_id}, skipping ...")
+                return False
+
+            seq_onehot = self.one_hot_encode_sequence(seq)
             L = len(seq)
             lengths = np.array([L] * L)
-
-            if type(IF1_tensor) == bool or type(struc_full) == bool:
-                log.error(
-                    f"Failed to read embedding / structure / sequence from {pdb_id}"
-                )
-                return False
 
             # Extract values from PDB
             (
@@ -704,6 +800,7 @@ def main(args):
             struc_type=args.struc_type,
             input_fasta=fasta_dict,
             overwrite_embeddings=args.overwrite_embeddings,
+            max_gpu_pdb_length=args.max_gpu_pdb_length,
             verbose=args.verbose,
         )
 

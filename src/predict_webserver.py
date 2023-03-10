@@ -11,13 +11,15 @@ log = logging.getLogger(__name__)
 
 # Ignore Biopython deprecation warnings
 import warnings
+
 from Bio import BiopythonDeprecationWarning
+
 warnings.filterwarnings("ignore", category=BiopythonDeprecationWarning)
 
+import re
+import copy
 import glob
 import os
-import re
-import shutil
 
 # Import modules
 import subprocess
@@ -34,6 +36,7 @@ from zipfile import ZipFile
 import biotite
 import biotite.structure.io as strucio
 import numpy as np
+import pandas as pd
 import requests
 import xgboost as xgb
 from Bio.PDB import PDBIO, Select
@@ -62,7 +65,7 @@ python src/predict_webserver.py \
 --list_file data/pdb_list_af2.txt \
 --struc_type alphafold \
 --out_dir output/pdb_list_af2
-
+ 
 """
     p = ArgumentParser(
         description="Predict Discotope-3.0 score on folder of input AF2 PDBs",
@@ -78,7 +81,7 @@ python src/predict_webserver.py \
 
     p.add_argument(
         "--web_server_mode",
-        action='store_true',
+        action="store_true",
         default=False,
         help="Flag for printing HTML output",
     )
@@ -104,11 +107,15 @@ python src/predict_webserver.py \
     )
 
     p.add_argument(
-        "--pdb_dir", help="Directory with AF2 PDBs", type=lambda x: is_valid_path(p, x),
+        "--pdb_dir",
+        help="Directory with AF2 PDBs",
+        type=lambda x: is_valid_path(p, x),
     )
 
     p.add_argument(
-        "--out_dir", default="output/job1", help="Job output directory",
+        "--out_dir",
+        default="output/job1",
+        help="Job output directory",
     )
 
     p.add_argument(
@@ -125,9 +132,18 @@ python src/predict_webserver.py \
     )
 
     p.add_argument(
-        "--save_embeddings", default=False, help="Save embeddings to pdb_dir",
+        "--max_gpu_pdb_length",
+        type=int,
+        help="Maximum PDB length to embed on GPU (1000), otherwise CPU",
+        default=1000,
     )
- 
+
+    p.add_argument(
+        "--save_embeddings",
+        default=False,
+        help="Save embeddings to pdb_dir",
+    )
+
     p.add_argument("-v", "--verbose", type=int, default=1, help="Verbose logging")
 
     # Print help if no arguments
@@ -214,9 +230,11 @@ def check_valid_input(args):
     # Check XGBoost models present
     models = glob.glob(f"{args.models_dir}/XGB_*_of_*.json")
     if len(models) != 100:
-        log.error(f"Only found {len(models)}/100 models in {args.models_dir}")
         log.error(
-            f"Did you download/unzip the model JSON files (e.g. XGB_1_of_100.json)?"
+            f"ERROR: Found {len(models)}/100 XGBoost model JSON files in {args.models_dir}"
+        )
+        log.error(
+            f"Did you unzip the models.zip file? models/ should contain XGB_n_of_100.json files"
         )
         sys.exit(0)
 
@@ -229,7 +247,9 @@ def true_if_zip(infile):
 
 
 def load_models(
-    models_dir: str, num_models: int = 100, verbose: int = 1,
+    models_dir: str,
+    num_models: int = 100,
+    verbose: int = 1,
 ) -> List["xgb.XGBClassifier"]:
     """Loads saved XGBoostClassifier files containing model weights, returns list of XGBoost models"""
     import xgboost as xgb
@@ -256,7 +276,8 @@ def load_models(
 
 
 def predict_using_models(
-    models: List["xgb.XGBClassifier"], X: "np.array",
+    models: List["xgb.XGBClassifier"],
+    X: "np.array",
 ) -> "np.array":
     """Returns np.array of predictions averaged from ensemble of XGBoost models"""
 
@@ -281,12 +302,98 @@ def predict_using_models(
     return y_hat
 
 
+def set_struc_res_bfactor(atom_array, res_values):
+    """Set per-residue B-factor of atom_array to res_values (DiscoTope-3.0 predictions)"""
+
+    # Get relative indices starting from 1. Copy to avoid modifying original
+    atom_array_renum = biotite.structure.renumber_res_ids(
+        copy.deepcopy(atom_array), start=1
+    )
+    atom_array.b_factor = res_values[atom_array_renum.res_id - 1]
+
+    return atom_array
+
+
+def predict_and_save(models, dataset, pdb_dir, out_dir, verbose: int = 0) -> None:
+    """Predicts and saves CSV/PDBs with DiscoTope-3.0 scores"""
+
+    log.info(f"Predicting PDBs ...")
+
+    # Speed up predictions by predicting entire dataset, exclude missing PDBs
+    X_all = np.concatenate(
+        [
+            dataset[i]["X_arr"]
+            for i in range(len(dataset))
+            if dataset[i]["X_arr"] is not False
+        ]
+    )
+    y_all = predict_using_models(models, X_all)
+
+    # Put in predictions for each PDB dataframe
+    df_all = pd.concat(
+        [
+            dataset[i]["df_stats"]
+            for i in range(len(dataset))
+            if dataset[i]["X_arr"] is not False
+        ]
+    )
+    df_all.insert(3, "DiscoTope-3.0_score", y_all)
+
+    # Keep track of structures for later
+    strucs_all = [
+        dataset[i]["PDB_biotite"]
+        for i in range(len(dataset))
+        if dataset[i]["X_arr"] is not False
+    ]
+
+    # PDB lengths used to infer which PDBs the predictions belong to
+    X_lens = [
+        len(dataset[i]["X_arr"])
+        for i in range(len(dataset))
+        if dataset[i]["X_arr"] is not False
+    ]
+    pdbids_all = [
+        dataset[i]["pdb_id"]
+        for i in range(len(dataset))
+        if dataset[i]["X_arr"] is not False
+    ]
+
+    if len(X_all) != sum(X_lens):
+        log.error(
+            f"Software bug: PDB feature array length {len(X_all)} does not match summed PDB lengths {sum(X_lens)}"
+        )
+        sys.exit(1)
+
+    if len(X_all) != len(df_all):
+        log.error(
+            f"Software bug: PDB feature array length {len(df_all)} does not match merged PDBs dataframe length {len(df_all)}"
+        )
+        sys.exit(1)
+
+    # Save predictions
+    start = 0
+    for _pdb, L, struc in zip(pdbids_all, X_lens, strucs_all):
+        log.info(f"Saving predictions for {_pdb} to {out_dir}")
+        end = start + L
+        df = df_all.iloc[start:end]
+        start = end
+
+        # Save DF
+        outfile = f"{out_dir}/{_pdb}_discotope3.csv"
+        df.to_csv(outfile, index=False)
+
+        # Add scores to PDB
+        struc_pred = set_struc_res_bfactor(struc, df["DiscoTope-3.0_score"].values)
+
+        # Save PDB
+        outfile = f"{out_dir}/{_pdb}_discotope3.pdb"
+        strucio.save_structure(outfile, struc_pred)
+
+
 def write_model_prediction_csvs_pdbs(
-    models, dataset, pdb_or_tempdir, out_dir, verbose: int = 0
+    models, dataset, pdb_dir, out_dir, verbose: int = 0
 ) -> None:
     """Calculates predictions for dataset PDBs, saves output .csv and .pdb files"""
-
-    os.makedirs(f"{out_dir}/download", exist_ok=True)
 
     for i, sample in enumerate(dataset):
         try:
@@ -322,8 +429,10 @@ def write_model_prediction_csvs_pdbs(
             values = sample["y_hat"]
             # target_values = ((values - values.min()) / (values.max() - values.min())) * 100
 
-            # Get relative indices starting from 1
-            atom_array_renum = biotite.structure.renumber_res_ids(atom_array, start=1)
+            # Get relative indices starting from 1. Copy to avoid modifying original
+            atom_array_renum = biotite.structure.renumber_res_ids(
+                copy.deepcopy(atom_array), start=1
+            )
             atom_array.b_factor = values[atom_array_renum.res_id - 1]
 
             # Write PDB
@@ -333,8 +442,11 @@ def write_model_prediction_csvs_pdbs(
                     f"Writing {sample['pdb_id']} ({i+1}/{len(dataset)}) to {outfile}"
                 )
 
+            strucio.save_structure(outfile, atom_array)
+
+            """
             HEADER_INFO = ("HEADER", "TITLE", "COMPND", "SOURCE")
-            pdb_path = f"{pdb_or_tempdir}/{sample['pdb_id']}.pdb"
+            pdb_path = f"{pdb_dir}/{sample['pdb_id']}.pdb"
             # pdb_path = f"{out_dir.rsplit('/',1)[0]}/download/{sample['pdb_id']}.pdb"
 
             header = list()
@@ -345,13 +457,12 @@ def write_model_prediction_csvs_pdbs(
                     else:
                         break
 
-            strucio.save_structure(outfile, atom_array)
-
             with open(outfile, "r+") as f:
                 content = f.read()
                 f.seek(0, 0)
                 print(*header, sep="\n", file=f)
                 f.write(content)
+            """
 
         except Exception as E:
             log.error(
@@ -360,12 +471,12 @@ def write_model_prediction_csvs_pdbs(
             traceback.print_exc()
 
 
-def save_pdb(pdb_name, pdb_path, out_prefix, score):
+def save_pdb(pdb_path, pdb_name, bscore, outdir):
     class Clean_Chain(Select):
         def __init__(self, score, chain=None):
-            self.score = score
+            self.bscore = bscore
             self.chain = chain
-            if score is None:
+            if bscore is None:
                 self.const_score = None
             elif isinstance(score, (int, float)):
                 self.const_score = True
@@ -389,7 +500,7 @@ def save_pdb(pdb_name, pdb_path, out_prefix, score):
             if self.const_score is None:
                 pass
             elif self.const_score:
-                atom.set_bfactor(self.score)
+                atom.set_bfactor(self.bscore)
             else:
                 self.letter = atom.get_full_id()[3][2]
                 if atom.get_full_id()[3][2] not in (self.prev_letter, " "):
@@ -409,7 +520,7 @@ def save_pdb(pdb_name, pdb_path, out_prefix, score):
 
                 self.prev_resid = res_id
 
-                atom.set_bfactor(self.score[res_id - self.init_resid])
+                atom.set_bfactor(self.bscore[res_id - self.init_resid])
             return True
 
     HEADER_INFO = ("HEADER", "TITLE", "COMPND", "SOURCE")
@@ -428,12 +539,12 @@ def save_pdb(pdb_name, pdb_path, out_prefix, score):
     chains = structure.get_chains()
 
     for chain in chains:
-        pdb_out = f"{out_prefix}_{chain.get_id()}.pdb"
+        pdb_out = f"{outdir}/{pdb_name}_{chain.get_id()}.pdb"
         io_w_no_h = PDBIO()
         io_w_no_h.set_structure(structure)
         with open(pdb_out, "w") as f:
             print(*header, sep="\n", file=f)
-            io_w_no_h.save(f, Clean_Chain(score, chain))
+            io_w_no_h.save(f, Clean_Chain(bscore, chain))
 
 
 def fetch_and_process_from_list_file(list_file, out_dir):
@@ -452,7 +563,6 @@ def fetch_and_process_from_list_file(list_file, out_dir):
         sys.exit(0)
 
     for i, prot_id in enumerate(pdb_list):
-
         if os.path.exists(f"{out_dir}/{prot_id}.pdb"):
             log.info(
                 f"PDB {i+1} / {len(pdb_list)} ({prot_id}) already present: {out_dir}/{prot_id}.pdb"
@@ -464,10 +574,10 @@ def fetch_and_process_from_list_file(list_file, out_dir):
 
         if args.struc_type == "alphafold":
             URL = f"https://alphafold.ebi.ac.uk/files/AF-{prot_id}-F1-model_v4.pdb"
-            score = None
+            bscore = None
         elif args.struc_type == "solved":
             URL = f"https://files.rcsb.org/download/{prot_id}.pdb"
-            score = 100
+            bscore = 100
         else:
             log.error(f"Structure ID was of unknown type {args.struc_type}")
             sys.exit(0)
@@ -499,7 +609,9 @@ def fetch_and_process_from_list_file(list_file, out_dir):
             )
             sys.exit(0)
 
-        save_pdb(f"{prot_id}", f"{out_dir}/temp", f"{out_dir}/{prot_id}", score)
+        save_pdb(
+            pdb_path=f"{out_dir}/temp", pdb_name=prot_id, bscore=bscore, outdir=out_dir
+        )
 
 
 def get_basename_no_ext(filepath):
@@ -561,68 +673,89 @@ def main(args):
     """Main function"""
 
     # Create temporary directory
-    with tempfile.TemporaryDirectory() as pdb_or_tempdir:
+    with tempfile.TemporaryDirectory() as tempdir:
+        input_chains_dir = f"{args.out_dir}/input_chains"
+        os.makedirs(input_chains_dir, exist_ok=True)
 
-        pdb_or_tempdir = f"{args.out_dir}/download"
-        os.makedirs(pdb_or_tempdir, exist_ok=True)
+        # Set B-factor / pLDDT column to 100 for solved structures, leave as is for AF2 structures
+        if args.struc_type == "alphafold":
+            bscore = 100
+        else:
+            bscore = None
 
         # 1. Download PDBs from RCSB or AlphaFoldDB
         if args.list_file:
             log.info(f"Fetching PDBs")
-            fetch_and_process_from_list_file(args.list_file, pdb_or_tempdir)
+            fetch_and_process_from_list_file(args.list_file, input_chains_dir)
 
         # 2. Unzip if ZIP, else single PDB
         if args.pdb_or_zip_file:
             if true_if_zip(args.pdb_or_zip_file):
                 log.info(f"Unzipping PDBs")
                 zf = ZipFile(args.pdb_or_zip_file)
-                zf.extractall(pdb_or_tempdir)
+                zf.extractall(tempdir)
+
+                for f in glob.glob(f"{tempdir}/*.pdb"):
+                    pdb_name = get_basename_no_ext(f)
+                    save_pdb(f, pdb_name, bscore, input_chains_dir)
 
             # 3. If single PDB, copy to tempdir
             else:
-                shutil.copy(args.pdb_or_zip_file, pdb_or_tempdir)
+                f = args.pdb_or_zip_file
+                pdb_name = get_basename_no_ext(f)
+                save_pdb(f, pdb_name, bscore, input_chains_dir)
 
         # 4. Load from PDB folder
         if args.pdb_dir:
-            pdb_or_tempdir = args.pdb_dir
+            for f in glob.glob(f"{args.pdb_dir}/*.pdb"):
+                pdb_name = get_basename_no_ext(f)
+                save_pdb(f, pdb_name, bscore, input_chains_dir)
 
         # Embed and predict
         log.info(f"Pre-processing PDBs")
         dataset = Discotope_Dataset_web(
-            pdb_or_tempdir,
+            input_chains_dir,
             structure_type=args.struc_type,
             check_existing=args.check_existing,
             save_embeddings=args.save_embeddings,
+            max_gpu_pdb_length=args.max_gpu_pdb_length,
             verbose=args.verbose,
         )
         if len(dataset) == 0:
-            log.error("Error: No files in dataset.")
+            log.error("Error: No PDB files were valid.")
             sys.exit(0)
 
-        # Predict and save
-        log.info(f"Loading XGBoost ensemble")
-        models = load_models(args.models_dir, num_models=100)  # MH
+        # Load pre-trained XGBoost models
+        models = load_models(args.models_dir, num_models=100)
 
-        log.info(f"Writing prediction .csv and .pdb files")
+        # Predict all PDBs, save to CSV and PDB files
+        # predict_and_save(
+        #    models,
+        #    dataset,
+        #    input_chains_dir,
+        #    out_dir=f"{args.out_dir}/output",
+        #    verbose=args.verbose,
+        # )
+
         write_model_prediction_csvs_pdbs(
             models,
             dataset,
-            pdb_or_tempdir,
+            input_chains_dir,
             out_dir=f"{args.out_dir}/output",
             verbose=args.verbose,
         )
 
-        # Zip output folder
-        log.info(f"Compressing ZIP file")
-        out_zip = zip_folder_timeout(
-            in_dir=f"{args.out_dir}/output", out_dir=f"{args.out_dir}/output"
-        )
-
         # Check which files failed
-        check_missing_pdb_csv_files(pdb_or_tempdir, f"{args.out_dir}/output")
-        log.info(f"Done!")
+        # check_missing_pdb_csv_files(input_chains_dir, f"{args.out_dir}/output")
+        # log.info(f"Done!")
 
         if args.web_server_mode:
+            # Zip output folder
+            log.info(f"Compressing ZIP file")
+            out_zip = zip_folder_timeout(
+                in_dir=f"{args.out_dir}/output", out_dir=f"{args.out_dir}/output"
+            )
+
             # HTML printing
             web_prefix = "/".join(f"{args.out_dir}/output".rsplit("/", 5)[1:])
             out_zip = f"{web_prefix}/{out_zip}"
@@ -674,7 +807,6 @@ def main(args):
 
 
 if __name__ == "__main__":
-
     args = cmdline_args()
     os.makedirs(f"{args.out_dir}/output", exist_ok=True)
 
@@ -690,33 +822,27 @@ if __name__ == "__main__":
     # Error messages if invalid input
     check_valid_input(args)
 
-    # Web server mode: print logging/errors to console, viewable in HTML
+    # Web_server_mode only print errors
     if args.web_server_mode:
+        logging.getLogger().setLevel(logging.ERROR)
 
-        # Exclude deprecation warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+    # Verbose logging setting
+    elif args.verbose == 1:
+        logging.getLogger().setLevel(logging.INFO)
 
-            try:
-                main(args)
+    elif args.verbose >= 2:
+        logging.getLogger().setLevel(logging.DEBUG)
 
-            except Exception as E:
-                log.exception(
-                    f"Prediction encountered an unexpected error. This is likely a bug in the server software: {E}"
-                )
+    # Exclude deprecation warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
 
-    # Running locally
-    else:
+        try:
+            log.info("Predicting PDBs using Discotope-3.0")
+            main(args)
+            log.info("Done!")
 
-        # Verbose logging setting
-        if args.verbose == 1:
-            logging.getLogger().setLevel(logging.INFO)
-
-        elif args.verbose >= 2:
-            logging.getLogger().setLevel(logging.DEBUG)
-
-        # Run main program
-        log.info("Predicting PDBs using Discotope-3.0")
-        main(args)
-
-        log.info("Done!")
+        except Exception as E:
+            log.exception(
+                f"Prediction encountered an unexpected error. This is likely a bug in the server software: {E}"
+            )

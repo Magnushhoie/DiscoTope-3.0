@@ -2,6 +2,7 @@
 *.pdb
 *.pt
 old/
+temp/
 
 # Added
 !*.dvc
