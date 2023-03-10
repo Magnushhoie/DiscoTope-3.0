@@ -103,9 +103,9 @@ On a common workstation with a GPU, predictions takes ~ 1 second per PDB chain w
 
 ```bash
 python src/predict_webserver.py \
---pdb_or_zip_file data/example_pdbs_solved/7lkh.pdb \
+--pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb \
 --struc_type solved \
---out_dir output/7lkh
+--out_dir output/7c4s
 ```
 
 ## Reproduce test-set predictions (AlphaFold2 structures)
@@ -193,8 +193,8 @@ ATOM      4  O   GLY A   1     144.482 170.199 141.027  1.00  4.60           O
 
 # Common issues
 
-- Breaks on single chains with invalid amino-acid residues in the extracted backbone (solved structures only)
-- PDBConstructionWarning regarding discontinuous chains: Indicates missing residue atoms in the input PDB file. Common issue for solved structures. May impact impact DiscoTope-3.0 performance (solved structures only)
+- Error: Biotite/ESM-IF1 unable to process chain {_pdb}. No present amino-acid backbone atoms: occurs if only heteroatoms (non-amino acid residues) are found in the extracted chain. DiscoTope-3.0 requires full amino-acid backbone C, Ca and N atoms.
+- PDBConstructionWarning regarding discontinuous chains: Indicates missing residue atoms in the input PDB file. May impact impact DiscoTope-3.0 performance (solved structures only)
 - Biopython future deprecation warning: Benign Biopython library warning, does not impact predictions
 - ESM regression weights missing warning: Benign fair-esm library warning, does not impact predictions
 

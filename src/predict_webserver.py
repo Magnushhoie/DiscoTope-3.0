@@ -38,11 +38,6 @@ from Bio.PDB.PDBParser import PDBParser
 
 from make_dataset import Discotope_Dataset_web
 
-# import traceback
-
-
-
-
 
 def cmdline_args():
     # Make parser object
@@ -389,7 +384,9 @@ def predict_and_save(models, dataset, pdb_dir, out_dir, verbose: int = 0) -> Non
         df.to_csv(outfile, index=False)
 
         # Save PDB, after adding prediction scores
-        struc_pred = set_struc_res_bfactor(struc, df["DiscoTope-3.0_score"].values * 100)
+        struc_pred = set_struc_res_bfactor(
+            struc, df["DiscoTope-3.0_score"].values * 100
+        )
         outfile = f"{out_dir}/{_pdb}_discotope3.pdb"
         strucio.save_structure(outfile, struc_pred)
 
@@ -577,7 +574,9 @@ def zip_folder_timeout(in_dir, out_dir, timeout_seconds=60) -> str:
     timestamp = time.strftime("%Y%m%d%H%M")
     file_name = f"discotope3_{timestamp}.zip"
     zip_path = f"{out_dir}/{file_name}"
-    bashCommand = f"zip -j {zip_path} {in_dir}/log.txt {in_dir}/*.pdb {in_dir}/*.csv || exit"
+    bashCommand = (
+        f"zip -j {zip_path} {in_dir}/log.txt {in_dir}/*.pdb {in_dir}/*.csv || exit"
+    )
 
     try:
         output = subprocess.run(
