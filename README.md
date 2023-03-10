@@ -165,7 +165,9 @@ The CSV output files contains per-residue outputs, with the following column hea
 - Chain length
 - A binary feature set to 1 for AlphaFold structures.
 
-Example input:
+The PDB output files contain individual single chains with the B-factor column replaced with per-residue DiscoTope-3.0 scores (2nd right-most column). Note that the scores are multiplied by 100 as PDB files only allow 2 decimals of precision.
+
+Example input PDB (see [7c4s.pdb](./data/example_pdbs_solved/7c4s.pdb)):
 ```bash
 python src/predict_webserver.py \
 --pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb \
@@ -173,7 +175,7 @@ python src/predict_webserver.py \
 --out_dir output/7c4s
 ```
 
-Example output CSV (see [output/7c4s/7c4s_A_discotope3.csv](./output/7c4s/7c4s_A_discotope3.csv)):
+Example output CSV (see [7c4s_A_discotope3.csv](./output/7c4s/output/7c4s_A_discotope3.csv)):
 ```text
 pdb,res_id,residue,DiscoTope-3.0_score,rsa,pLDDTs,length,alphafold_struc_flag
 7c4s_A,14,G,0.15186,0.80634,100,282,0
@@ -181,9 +183,7 @@ pdb,res_id,residue,DiscoTope-3.0_score,rsa,pLDDTs,length,alphafold_struc_flag
 7c4s_A,16,E,0.23955,0.72919,100,282,0
 ```
 
-The PDB output files contain individual single chains with the B-factor column replaced with per-residue DiscoTope-3.0 scores (2nd right-most column). Note that the scores are multiplied by 100 as PDB files only allow 2 decimals of precision.
-
-Example output PDB (see [output/7c4s/7c4s_A_discotope3.pdb](./output/7c4s/7c4s_A_discotope3.pdb)):
+Example output PDB (see [7c4s_A_discotope3.pdb](./output/7c4s/output/7c4s_A_discotope3.pdb)):
 ```text
 ATOM      1  N   GLY A  14     -16.773 -32.069  23.105  1.00 15.19           N  
 ATOM      2  CA  GLY A  14     -15.595 -32.029  23.955  1.00 15.19           C  
