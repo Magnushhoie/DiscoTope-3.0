@@ -32,7 +32,7 @@ DiscoTope-3.0 accepts both experimental and AlphaFold2 modeled structures, with 
 
 ## Hardware Requirements
 
-For minimal performance, only a single core and ca 8 GB of RAM is needed. For optional performance, we recommend the following specs:
+For minimal performance, only a single core and ca 8 GB of RAM is needed. For optimal performance, we recommend the following specs:
 
 - RAM: 16+ GB
 - CPU: 4+ cores
