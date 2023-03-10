@@ -159,36 +159,36 @@ The CSV output files contains per-residue outputs, with the following column hea
 - PDB ID and chain name
 - Relative residue index (re-numbered from 1)
 - Amino-acid residue, 1-letter
-- DiscoTope-3.0 score
+- DiscoTope-3.0 score (theoretical range 0.00 - 1.00)
 - Relative surface accessibility (Shrake-Rupley, normalized using Sander scale)
-- AlphaFold pLDDT score (set to 100 for non-AlphaFold structures)
+- AlphaFold pLDDT score (0-100, set to 100 for non-AlphaFold structures)
 - Chain length
 - A binary feature set to 1 for AlphaFold structures.
 
 Example input:
 ```bash
 python src/predict_webserver.py \
---pdb_or_zip_file data/example_pdbs_solved/7lkh.pdb \
+--pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb \
 --struc_type solved \
---out_dir output/7lkh
+--out_dir output/7c4s
 ```
 
-Example output CSV (see [output/7lkh/7lkh_A_discotope3.csv](./output/7lkh/7lkh_A_discotope3.csv)):
+Example output CSV (see [output/7c4s/7c4s_A_discotope3.csv](./output/7c4s/7c4s_A_discotope3.csv)):
 ```text
 pdb,res_id,residue,DiscoTope-3.0_score,rsa,pLDDTs,length,alphafold_struc_flag
-7lkh_A,53,G,0.04597,1.30833,100,286,0
-7lkh_A,54,P,0.05957,0.26530,100,286,0
-7lkh_A,55,V,0.05202,0.43499,100,286,0
+7c4s_A,14,G,0.15186,0.80634,100,282,0
+7c4s_A,15,Q,0.13953,0.45077,100,282,0
+7c4s_A,16,E,0.23955,0.72919,100,282,0
 ```
 
-The PDB output files contain individual single chains with the B-factor column replaced with per-residue DiscoTope-3.0 scores (2nd right-most column).
+The PDB output files contain individual single chains with the B-factor column replaced with per-residue DiscoTope-3.0 scores (2nd right-most column). Note that the scores are multiplied by 100 as PDB files only allow 2 decimals of precision.
 
-Example output PDB (see [output/7lkh/7lkh_A_discotope3.pdb](./output/7lkh/7lkh_A_discotope3.pdb)):
+Example output PDB (see [output/7c4s/7c4s_A_discotope3.pdb](./output/7c4s/7c4s_A_discotope3.pdb)):
 ```text
-ATOM      1  N   GLY A   1     143.756 170.612 143.660  1.00  4.60           N  
-ATOM      2  CA  GLY A   1     142.861 169.851 142.747  1.00  4.60           C  
-ATOM      3  C   GLY A   1     143.525 169.536 141.422  1.00  4.60           C  
-ATOM      4  O   GLY A   1     144.482 170.199 141.027  1.00  4.60           O  
+ATOM      1  N   GLY A  14     -16.773 -32.069  23.105  1.00 15.19           N  
+ATOM      2  CA  GLY A  14     -15.595 -32.029  23.955  1.00 15.19           C  
+ATOM      3  C   GLY A  14     -14.287 -31.844  23.204  1.00 15.19           C  
+ATOM      4  O   GLY A  14     -13.284 -32.465  23.555  1.00 15.19           O  
 ```
 
 # Common issues

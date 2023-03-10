@@ -385,7 +385,7 @@ def predict_and_save(models, dataset, pdb_dir, out_dir, verbose: int = 0) -> Non
 
         # Save PDB, after adding prediction scores
         struc_pred = set_struc_res_bfactor(
-            struc, df["DiscoTope-3.0_score"].values * 100
+            struc, df["DiscoTope-3.0_score"].values.astype(float) * 100
         )
         outfile = f"{out_dir}/{_pdb}_discotope3.pdb"
         strucio.save_structure(outfile, struc_pred)
