@@ -187,8 +187,8 @@ ATOM      3  C   PRO A   1     -14.773  -8.177  14.946  1.00 22.10           C
 
 - Breaks on single chains with invalid amino-acid residues in the extracted backbone (solved structures only)
 - PDBConstructionWarning regarding discontinuous chains: Indicates missing residue atoms in the input PDB file. Common issue for solved structures. May impact impact DiscoTope-3.0 performance (solved structures only)
-- Biopython and ESM future deprecation warnings: Benign library warnings, does not impact predictions
-- ESM regression weights missing warning: Benign fair-esm library warning, does not impact predicitons
+- Biopython future deprecation warning: Benign Biopython library warning, does not impact predictions
+- ESM regression weights missing warning: Benign fair-esm library warning, does not impact predictions
 
 # Citation
 For usage of the package and associated manuscript, please cite according to the enclosed [citation.bib](./citation.bib).
