@@ -57,7 +57,6 @@ Linux: Ubuntu 18.04
 - [fair-esm 0.5](https://github.com/facebookresearch/esm)
 - [Biopython](https://github.com/biopython/biopython)
 - [Biotite](https://github.com/biotite-dev/biotite)
-- [prody](https://github.com/prody/ProDy)
 - [pandas](https://github.com/pandas-dev/pandas)
 - [numpy](https://github.com/numpy/numpy)
 
