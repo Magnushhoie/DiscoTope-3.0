@@ -473,8 +473,8 @@ def get_atomarray_res_sasa(atom_array):
     # The following line calculates the atom-wise SASA of the atom array
     atom_sasa = biotite.structure.sasa(atom_array, vdw_radii="ProtOr")
 
-    # Sum up SASA for each residue in atom array
-    res_sasa = biotite.structure.apply_residue_wise(atom_array, atom_sasa, np.sum)
+    # Sum up SASA for each residue in atom array. Exclude nans with np.nansun
+    res_sasa = biotite.structure.apply_residue_wise(atom_array, atom_sasa, np.nansum)
 
     return res_sasa
 
