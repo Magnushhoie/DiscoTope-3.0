@@ -10,7 +10,6 @@
 - [Citation](#citation)
 - [License](./LICENSE)
 
-
 # Overview
 
 DiscoTope-3.0 is a structure-based B-cell epitope prediction tool, exploiting inverse folding latent representations from the [ESM-IF1](https://github.com/facebookresearch/esm) model. The tool accepts input protein structures in the [PDB](https://en.wikipedia.org/wiki/Protein_Data_Bank_(file_format)) format (solved or predicted), and outputs per-residue epitope propensity scores in both a PDB and CSV format.
@@ -33,7 +32,7 @@ DiscoTope-3.0 accepts both experimental and AlphaFold2 modeled structures, with 
 
 ## Hardware Requirements
 
-For minimal performance, only a single core and ca 8 GB of RAM is needed. For optional performance, we recommend the following specs:
+For minimal performance, only a single core and ca 8 GB of RAM is needed. For optimal performance, we recommend the following specs:
 
 - RAM: 16+ GB
 - CPU: 4+ cores
@@ -193,7 +192,7 @@ ATOM      4  O   GLY A  14     -13.284 -32.465  23.555  1.00 15.19           O
 # Common issues
 
 - Error: Biotite/ESM-IF1 unable to process chain {_pdb}. No present amino-acid backbone atoms: occurs if only heteroatoms (non-amino acid residues) are found in the extracted chain. DiscoTope-3.0 requires full amino-acid backbone C, Ca and N atoms.
-- PDBConstructionWarning regarding discontinuous chains: Indicates missing residue atoms in the input PDB file. May impact impact DiscoTope-3.0 performance (solved structures only)
+- PDBConstructionWarning regarding discontinuous chains: Indicates missing residue atoms in the input PDB file. May impact DiscoTope-3.0 performance (solved structures only)
 - Biopython future deprecation warning: Benign Biopython library warning, does not impact predictions
 - ESM regression weights missing warning: Benign fair-esm library warning, does not impact predictions
 
