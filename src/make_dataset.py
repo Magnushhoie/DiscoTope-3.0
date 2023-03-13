@@ -131,7 +131,7 @@ def cmdline_args():
 
 def load_IF1_tensors(
     pdb_files: List,
-    check_existing_emeddings=True,
+    check_existing_embeddings=True,
     save_embeddings=True,
     cpu_only=False,
     max_gpu_pdb_length: int = 1000,
@@ -183,7 +183,7 @@ def load_IF1_tensors(
 
         # Load IF1 tensor if already exists and flag is set (default always embed from scratch)
         embed_file = re.sub(r".pdb$", ".pt", pdb_path)
-        if check_existing_emeddings and os.path.exists(embed_file):
+        if check_existing_embeddings and os.path.exists(embed_file):
             log.debug(
                 f"{i+1} / {len(pdb_files)}: Loading existing embedding file for {_pdb}: {embed_file}"
             )
@@ -566,7 +566,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
         self,
         pdb_dir: str,
         structure_type: int,  # alphafold or solved
-        check_existing_emeddings: bool = False,  # Try to load previous embedding files
+        check_existing_embeddings: bool = False,  # Try to load previous embedding files
         save_embeddings: bool = False,  # Save new embedding files
         preprocess: bool = True,
         cpu_only: bool = False,
@@ -578,7 +578,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
         self.n_jobs = n_jobs
         self.preprocess = preprocess
         self.structure_type = structure_type
-        self.check_existing_emeddings = check_existing_emeddings
+        self.check_existing_embeddings = check_existing_embeddings
         self.save_embeddings = save_embeddings
         self.cpu_only = cpu_only
         self.max_gpu_pdb_length = max_gpu_pdb_length
@@ -599,7 +599,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
                 self.list_sequences,
             ) = load_IF1_tensors(
                 self.list_pdb_files,
-                check_existing_emeddings=self.check_existing_emeddings,
+                check_existing_embeddings=self.check_existing_embeddings,
                 save_embeddings=self.save_embeddings,
                 cpu_only=self.cpu_only,
                 max_gpu_pdb_length=self.max_gpu_pdb_length,

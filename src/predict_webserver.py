@@ -581,11 +581,11 @@ def report_pdb_input_outputs(pdb_list, in_dir, out_dir) -> None:
     missing_pdbs = in_dict.keys() - out_dict.keys()
     if len(missing_pdbs) >= 1:
         log.info(
-            f"Note: Excluded predicting some PDB chain(s) (see log file):\n{', '.join(missing_pdbs)}"
+            f"Note: Excluded predicting {len(missing_pdbs)} PDB chain(s) (see log file):\n{', '.join(missing_pdbs)}"
         )
 
 
-def zip_folder_timeout(in_dir, out_dir, timeout_seconds=60) -> str:
+def zip_folder_timeout(in_dir, out_dir, timeout_seconds=120) -> str:
     """Zips in_dir, writes to out_dir, returns zip file"""
 
     timestamp = time.strftime("%Y%m%d%H%M")
