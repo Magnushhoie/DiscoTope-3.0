@@ -581,7 +581,7 @@ def report_pdb_input_outputs(pdb_list, in_dir, out_dir) -> None:
     missing_pdbs = in_dict.keys() - out_dict.keys()
     if len(missing_pdbs) >= 1:
         log.info(
-            f"Note: Excluded predicting some PDB chain(s) (see log file):\n{', '.join(missing_pdbs)}"
+            f"Note: Excluded predicting {len(missing_pdbs)} PDB chain(s) (see log file):\n{', '.join(missing_pdbs)}"
         )
 
 
