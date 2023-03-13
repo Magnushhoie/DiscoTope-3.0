@@ -95,8 +95,8 @@ python src/predict_webserver.py \
 
     p.add_argument(
         "--struc_type",
-        required=False,  # Only needed for file input, not list
-        default="alphafold",
+        required=True,  # Only needed for file input, not list
+        default="solved",
         help="Structure type from file (solved | alphafold)",
     )
 
