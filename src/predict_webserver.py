@@ -384,7 +384,9 @@ def predict_and_save(models, dataset, pdb_dir, out_dir, verbose: int = 0) -> Non
     # Fetch pre-computed predictions by PDB lengths, save to CSV/PDB
     start = 0
     for _pdb, L, struc in zip(pdbids_all, X_lens, strucs_all):
-        log.debug(f"Saving predictions for {_pdb} to {out_dir}")
+        log.debug(
+            f"Saving predictions for {_pdb} CSV/PDB to {out_dir}/{_pdb}_discotope3.csv"
+        )
 
         end = start + L
         df = df_all.iloc[start:end]
@@ -719,6 +721,9 @@ def main(args):
                 zf.extractall(tempdir)
 
                 pdb_list = glob.glob(f"{tempdir}/*.pdb")
+                log.info(
+                    f"Extracted {len(pdb_list)} PDBs from ZIP, extracting single chains to {input_chains_dir}"
+                )
                 for f in pdb_list:
                     pdb_name = get_basename_no_ext(f)
                     save_clean_pdb_single_chains(f, pdb_name, bscore, input_chains_dir)
@@ -728,11 +733,17 @@ def main(args):
             f = args.pdb_or_zip_file
             pdb_name = get_basename_no_ext(f)
             pdb_list = [pdb_name]
+            log.info(
+                f"Single PDB file input ({pdb_name}), extracting single chains to {input_chains_dir}"
+            )
             save_clean_pdb_single_chains(f, pdb_name, bscore, input_chains_dir)
 
     # 4. Load from PDB folder
     if args.pdb_dir:
         pdb_list = glob.glob(f"{args.pdb_dir}/*.pdb")
+        log.info(
+            f"Found {len(pdb_list)} PDBs in {args.pdb_dir}, extracting single chains to {input_chains_dir}"
+        )
         for f in pdb_list:
             pdb_name = get_basename_no_ext(f)
             save_clean_pdb_single_chains(f, pdb_name, bscore, input_chains_dir)
@@ -788,6 +799,7 @@ if __name__ == "__main__":
     os.makedirs(f"{args.out_dir}/output/", exist_ok=True)
 
     # Log to file and stdout
+    # If verbose == 0, only errors are printed (default 1)
     log_path = os.path.abspath(f"{args.out_dir}/output/log.txt")
     logging.basicConfig(
         level=logging.ERROR,
@@ -803,12 +815,8 @@ if __name__ == "__main__":
     # Error messages if invalid input
     check_valid_input(args)
 
-    # ERROR only prints errors
-    if args.web_server_mode:
-        logging.getLogger().setLevel(logging.ERROR)
-
-    # INFO only prints total summary and errors (default)
-    elif args.verbose == 1:
+    # INFO prints total summary and errors (default)
+    if args.web_server_mode or args.verbose == 1:
         logging.getLogger().setLevel(logging.INFO)
 
     # DEBUG prints every major step
