@@ -191,7 +191,7 @@ ATOM      4  O   GLY A  14     -13.284 -32.465  23.555  1.00 15.19           O
 
 # Common issues
 
-- Error: Biotite/ESM-IF1 unable to process chain {_pdb}. No present amino-acid backbone atoms: occurs if only heteroatoms (non-amino acid residues) are found in the extracted chain. DiscoTope-3.0 requires full amino-acid backbone C, Ca and N atoms.
+- No valid amino-acid backbone found: Occurs if only heteroatoms (non-amino acid residues) are found in the extracted chain. DiscoTope-3.0 requires full amino-acid backbone C, Ca and N atoms.
 - PDBConstructionWarning regarding discontinuous chains: Indicates missing residue atoms in the input PDB file. May impact DiscoTope-3.0 performance (solved structures only)
 - Biopython future deprecation warning: Benign Biopython library warning, does not impact predictions
 - ESM regression weights missing warning: Benign fair-esm library warning, does not impact predictions
