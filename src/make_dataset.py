@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 import torch
 # Use Sander values instead
-from biotite.structure import filter_backbone, get_chains
+from biotite.structure import filter_amino_acids, filter_backbone, get_chains
 from biotite.structure.io import pdb, pdbx
 from biotite.structure.residues import get_residues
 from joblib import Parallel, delayed
@@ -131,7 +131,7 @@ def cmdline_args():
 
 def load_IF1_tensors(
     pdb_files: List,
-    check_existing=True,
+    check_existing_emeddings=True,
     save_embeddings=True,
     cpu_only=False,
     max_gpu_pdb_length: int = 1000,
@@ -160,7 +160,7 @@ def load_IF1_tensors(
                 str(pdb_path), chain=None
             )
         except Exception as E:
-            log.error(f"Note: No amino-acid backbone found in {_pdb}")
+            log.error(f"Note: Skipping {_pdb}, no valid amino-acid backbone found")
             log.debug(f"Error: {E}")
             list_IF1_tensors.append(False)
             list_structures.append(False)
@@ -183,7 +183,7 @@ def load_IF1_tensors(
 
         # Load IF1 tensor if already exists and flag is set (default always embed from scratch)
         embed_file = re.sub(r".pdb$", ".pt", pdb_path)
-        if check_existing and os.path.exists(embed_file):
+        if check_existing_emeddings and os.path.exists(embed_file):
             log.debug(
                 f"{i+1} / {len(pdb_files)}: Loading existing embedding file for {_pdb}: {embed_file}"
             )
@@ -218,10 +218,13 @@ def load_IF1_tensors(
 
             except Exception as E:
                 log.error(
-                    f"Error: Unable to embed {_pdb}. Out of GPU memory? Consider using --cpu_only flag or setting --max_gpu_pdb_length lower (default 1000)"
+                    f"Error: Unable to embed {_pdb}. Out of GPU memory? Consider using --cpu_only flag or setting --max_gpu_pdb_length lower (default 1000 residues)"
                 )
-                log.debug(f"Error: {E}")
-                traceback.print_exc()
+                log.error(f"Error: {E}")
+
+                if verbose >= 2:
+                    traceback.print_exc()
+
                 list_IF1_tensors.append(False)
                 list_structures.append(False)
                 list_sequences.append(False)
@@ -262,9 +265,14 @@ def load_structure_discotope(fpath, chain=None):
             except Exception as E:
                 log.error(f"Unable to read PDB file {fpath}: {E}")
 
+    # For IF1 embedding, only backbone is extracted (C, Ca, N atoms)
     bbmask = filter_backbone(structure_full)
     structure = structure_full[bbmask]
 
+    # For "full" structure, extract all (amino-acid residue) atoms
+    structure_full = structure_full[filter_amino_acids(structure_full)]
+
+    # By default all chains are loaded, but only single chains are inputted to DiscoTope-3.0
     all_chains = get_chains(structure)
 
     if len(all_chains) == 0:
@@ -432,9 +440,12 @@ def map_3letter_to_1letter(res_names: np.array):
 
     # Check for mismatches
     if "X" in np.unique(seq):
+        # Get PDB id from outside function
+        global pdb_id
+
         idxs = np.where(seq == "X")[0]
         unknown_res = np.unique(res_names[idxs])
-        log.error(f"Unknown residues found in PDB: {unknown_res}")
+        log.error(f"Unknown residues found in PDB {pdb_id}: {unknown_res}")
 
     return seq
 
@@ -461,6 +472,7 @@ def get_atomarray_res_sasa(atom_array):
     # Extract SASA
     # The following line calculates the atom-wise SASA of the atom array
     atom_sasa = biotite.structure.sasa(atom_array, vdw_radii="ProtOr")
+
     # Sum up SASA for each residue in atom array
     res_sasa = biotite.structure.apply_residue_wise(atom_array, atom_sasa, np.sum)
 
@@ -510,7 +522,7 @@ def structure_extract_seq_residx_bfac_rsas_diam(struc_full, chain_id):
 
     if len(rsa) != len(seq):
         log.error(
-            f"ERROR: RSA values {len(rsa)} do not match length of backbone residues {len(seq)}"
+            f"Error: RSA values {len(rsa)} do not match length of backbone residues {len(seq)}"
         )
 
     return seq, res_idxs, bfacs, rsa
@@ -554,7 +566,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
         self,
         pdb_dir: str,
         structure_type: int,  # alphafold or solved
-        check_existing: bool = False,  # Try to load previous embedding files
+        check_existing_emeddings: bool = False,  # Try to load previous embedding files
         save_embeddings: bool = False,  # Save new embedding files
         preprocess: bool = True,
         cpu_only: bool = False,
@@ -566,7 +578,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
         self.n_jobs = n_jobs
         self.preprocess = preprocess
         self.structure_type = structure_type
-        self.check_existing = check_existing
+        self.check_existing_emeddings = check_existing_emeddings
         self.save_embeddings = save_embeddings
         self.cpu_only = cpu_only
         self.max_gpu_pdb_length = max_gpu_pdb_length
@@ -587,7 +599,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
                 self.list_sequences,
             ) = load_IF1_tensors(
                 self.list_pdb_files,
-                check_existing=self.check_existing,
+                check_existing_emeddings=self.check_existing_emeddings,
                 save_embeddings=self.save_embeddings,
                 cpu_only=self.cpu_only,
                 max_gpu_pdb_length=self.max_gpu_pdb_length,
@@ -742,7 +754,9 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
 
         except Exception as E:
             log.error(f"Error processing chain {pdb_id}: {E}")
-            traceback.print_exc()
+
+            if self.verbose >= 2:
+                traceback.print_exc()
 
             return False
 

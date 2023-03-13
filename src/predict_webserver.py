@@ -1,5 +1,5 @@
-# Discotope 3.0 predict on folder of PDBs script
-# https://github.com/Magnushhoie/discotope3/
+# Discotope 3.0 - Predict B-cell epitope propensity from structure
+# https://github.com/Magnushhoie/discotope3_web
 
 MAX_FILES = 50
 MAX_FILE_SIZE_MB = 30
@@ -121,7 +121,7 @@ python src/predict_webserver.py \
     )
 
     p.add_argument(
-        "--check_existing",
+        "--check_existing_emeddings",
         default=False,
         help="Check for existing embeddings to load in pdb_dir",
     )
@@ -179,6 +179,9 @@ def check_valid_input(args):
             )
         sys.exit(1)
 
+    if args.list_file and not os.path.exists(args.list_file):
+        log.error(f"Error: List file {args.list_file} does not exist!")
+
     if args.list_file and not args.struc_type:
         log.error(
             f"Error: Must provide struc_type (solved or alphafold) with list_file"
@@ -205,7 +208,7 @@ def check_valid_input(args):
     # Check ZIP max-size, number of files
     if args.pdb_or_zip_file:
         size_mb = os.stat(args.pdb_or_zip_file).st_size / (1024 * 1024)
-        if size_mb > MAX_FILES:
+        if args.web_server_mode and size_mb > MAX_FILES:
             log.error(
                 f"Error: Max file-size {MAX_FILE_SIZE_MB} MB, found {round(size_mb)} MB"
             )
@@ -475,16 +478,14 @@ def save_clean_pdb_single_chains(pdb_path, pdb_name, bscore, outdir):
             io_w_no_h.save(f, Clean_Chain(bscore, chain))
 
 
-def fetch_list_file_extract_single_chains(list_file, out_dir):
+def fetch_pdbs_extract_single_chains(pdb_list, out_dir) -> None:
     """Fetch and process PDB chains/UniProt entries from list input"""
-
-    with open(list_file, "r") as f:
-        pdb_list = sorted(set([line.strip() for line in f.readlines()]))
 
     if len(pdb_list) == 0:
         log.error("Error: No IDs found in PDB list.")
         sys.exit(1)
-    elif len(pdb_list) > MAX_FILES:
+
+    elif args.web_server_mode and len(pdb_list) > MAX_FILES:
         log.error(
             f"Error: A maximum of {MAX_FILES} PDB IDs can be processed at one time. ({len(pdb_list)} IDs found)."
         )
@@ -514,23 +515,26 @@ def fetch_list_file_extract_single_chains(list_file, out_dir):
         if response.status_code == 200:
             with open(f"{out_dir}/temp", "wb") as f:
                 f.write(response.content)
+
         elif response.status_code == 404:
             log.error(
                 f"Error: File with the ID {prot_id} could not be found (url: {URL})."
             )
-            log.error("Maybe you selected the wrong ID type or misspelled the ID.")
-            log.error("Note that pdb files may not exist in RCSB for large structures.")
+            log.error("Maybe you selected the wrong ID type or misspelled the ID?")
+            log.error("Note that PDB files may not exist in RCSB for large structures")
             sys.exit(1)
+
         elif response.status_code in (408, 504):
             log.error(
                 f"Error: Request timed out with error code {response.status_code} (url: {URL})."
             )
             log.error(
-                """Try to download the structure(s) locally from the given database and upload as pdb or zip.
+                """Try to download the structure(s) locally from the given database and upload individually or as compressed zip with PDBs.
                 Bulk download script: https://www.rcsb.org/docs/programmatic-access/batch-downloads-with-shell-script
                 """
             )
             sys.exit(1)
+
         else:
             log.error(
                 f"Error: Received status code {response.status_code}, when trying to fetch file from {URL}"
@@ -540,9 +544,6 @@ def fetch_list_file_extract_single_chains(list_file, out_dir):
         save_clean_pdb_single_chains(
             pdb_path=f"{out_dir}/temp", pdb_name=prot_id, bscore=bscore, outdir=out_dir
         )
-
-    # Finally return list of PDB files
-    return pdb_list
 
 
 def get_basename_no_ext(filepath):
@@ -574,13 +575,13 @@ def report_pdb_input_outputs(pdb_list, in_dir, out_dir) -> None:
 
     # Report number of input vs outputs
     log.info(
-        f"Successfully predicted {len(out_pdbs)} / {len(in_pdbs)} single PDB chain(s) from {len(pdb_list)} input PDBs, saved to {args.out_dir}/output"
+        f"Predicted {len(out_pdbs)} / {len(in_pdbs)} single PDB chain(s) from {len(pdb_list)} input PDBs, saved to {args.out_dir}/output"
     )
 
     missing_pdbs = in_dict.keys() - out_dict.keys()
     if len(missing_pdbs) >= 1:
         log.info(
-            f"Missing predictions for the following PDB chain(s) (see log file):\n{', '.join(missing_pdbs)}"
+            f"Note: Excluded predicting some PDB chain(s) (see log file):\n{', '.join(missing_pdbs)}"
         )
 
 
@@ -668,6 +669,15 @@ def print_HTML_output_webpage(dataset, out_dir, out_zip) -> None:
     print(structures)
 
 
+def read_list_file(list_file) -> List[str]:
+    """Reads list file, returns list of PDB IDs"""
+
+    with open(list_file, "r") as f:
+        pdb_list = [line.strip() for line in f.readlines()]
+
+    return pdb_list
+
+
 def main(args):
     """Main function"""
 
@@ -690,9 +700,12 @@ def main(args):
     # 1. Download PDBs from RCSB or AlphaFoldDB
     if args.list_file:
         log.debug(f"Fetching PDBs")
-        pdb_list = fetch_list_file_extract_single_chains(
-            args.list_file, input_chains_dir
+
+        pdb_list = read_list_file(args.list_file)
+        log.info(
+            f"Fetching {len(pdb_list)} PDBs from {'RCSB' if args.struc_type == 'solved' else 'AlphaFoldDB'}, extracting single chains to {input_chains_dir}"
         )
+        fetch_pdbs_extract_single_chains(pdb_list, input_chains_dir)
 
     # Check whether input file is a compressed ZIP file or single PDB
     if args.pdb_or_zip_file:
@@ -724,12 +737,16 @@ def main(args):
             pdb_name = get_basename_no_ext(f)
             save_clean_pdb_single_chains(f, pdb_name, bscore, input_chains_dir)
 
+    # Summary statistics
+    chain_list = glob.glob(f"{input_chains_dir}/*.pdb")
+    log.info(f"Found {len(chain_list)} extracted single chains in {input_chains_dir}")
+
     # Embed end process PDB features
     log.debug(f"Pre-processing PDBs")
     dataset = Discotope_Dataset_web(
         input_chains_dir,
         structure_type=args.struc_type,
-        check_existing=args.check_existing,
+        check_existing_embeddings=args.check_existing_emeddings,
         save_embeddings=args.save_embeddings,
         cpu_only=args.cpu_only,
         max_gpu_pdb_length=args.max_gpu_pdb_length,
