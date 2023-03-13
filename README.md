@@ -17,7 +17,7 @@ DiscoTope-3.0 is a structure-based B-cell epitope prediction tool, exploiting in
 DiscoTope-3.0 accepts both experimental and AlphaFold2 modeled structures, with similar performance for both. It has been trained and validated only on single chain structures, meaning epitopes may be predicted in interface regions.
 
 - Paper: [10.1101/2023.02.05.527174](https://www.biorxiv.org/content/10.1101/2023.02.05.527174v1)
-- Full training/validation/testing datasets: https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0
+- Datasets: https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0
 - Web server DTU: https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0
 - Web server BioLib: https://biolib.com/DTU/DiscoTope-3/
 
