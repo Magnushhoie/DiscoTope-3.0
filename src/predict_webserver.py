@@ -43,16 +43,16 @@ def cmdline_args():
     # Make parser object
     usage = rf"""
 Options:
-    1) PDB file (--pdb_or_zip_file <file>)
-    2) Zip file of PDBs (--pdb_or_zip_file <file>)
-    3) PDB directory (--pdb_dir <folder>)
+    1) Single PDB file (--pdb_or_zip_file <file>)
+    2) Zip file containing PDBs (--pdb_or_zip_file <file>)
+    3) Directory with PDB files (--pdb_dir <folder>)
     4) File with PDB ids on each line (--list_file <file>)
 
 # Predict on example PDBs in data folder
 python src/predict_webserver.py \
 --pdb_dir data/example_pdbs_solved \
 --struc_type solved \
---out_dir output/data
+--out_dir output/example_pdbs_solved
 
 # Fetch PDBs from list file from AlphaFoldDB
 python src/predict_webserver.py \
@@ -108,7 +108,8 @@ python src/predict_webserver.py \
 
     p.add_argument(
         "--out_dir",
-        default="output/job1",
+        default="output/",
+        required=True,
         help="Job output directory",
     )
 
@@ -123,6 +124,13 @@ python src/predict_webserver.py \
         "--check_existing",
         default=False,
         help="Check for existing embeddings to load in pdb_dir",
+    )
+
+    p.add_argument(
+        "--cpu_only",
+        action="store_true",
+        default=False,
+        help="Use CPU even if GPU is available (default uses GPU if available)",
     )
 
     p.add_argument(
@@ -230,7 +238,7 @@ def check_valid_input(args):
             f"Error: Found {len(models)}/100 XGBoost model JSON files in {args.models_dir}"
         )
         log.error(
-            f"Did you unzip the models.zip file? models/ should contain XGB_n_of_100.json files"
+            f"Did you unzip the models.zip file? models/ should 100 XGBoost model files, with names XGB_n_of_100.json"
         )
         sys.exit(1)
 
@@ -253,12 +261,12 @@ def load_models(
     # Search for model files
     model_files = list(Path(models_dir).glob(f"XGB_*_of_*.json"))
 
-    if len(model_files) < 1:
-        log.error(f"Error: no files found in {models_dir}")
-        raise Exception
+    if len(model_files) == 0:
+        log.error(f"Error: no files found in {models_dir}.")
+        sys.exit(1)
 
     # Initialize new XGBoostClassifier and load model weights
-    log.info(
+    log.debug(
         f"Loading {num_models} / {len(model_files)} XGBoost models from {models_dir}"
     )
 
@@ -313,7 +321,7 @@ def set_struc_res_bfactor(atom_array, res_values):
 def predict_and_save(models, dataset, pdb_dir, out_dir, verbose: int = 0) -> None:
     """Predicts and saves CSV/PDBs with DiscoTope-3.0 scores"""
 
-    log.info(f"Predicting PDBs ...")
+    log.debug(f"Predicting PDBs ...")
 
     # Speed up predictions by predicting entire dataset, exclude missing PDBs
     X_all = np.concatenate(
@@ -373,7 +381,7 @@ def predict_and_save(models, dataset, pdb_dir, out_dir, verbose: int = 0) -> Non
     # Fetch pre-computed predictions by PDB lengths, save to CSV/PDB
     start = 0
     for _pdb, L, struc in zip(pdbids_all, X_lens, strucs_all):
-        log.info(f"Saving predictions for {_pdb} to {out_dir}")
+        log.debug(f"Saving predictions for {_pdb} to {out_dir}")
 
         end = start + L
         df = df_all.iloc[start:end]
@@ -391,7 +399,7 @@ def predict_and_save(models, dataset, pdb_dir, out_dir, verbose: int = 0) -> Non
         strucio.save_structure(outfile, struc_pred)
 
 
-def save_pdb(pdb_path, pdb_name, bscore, outdir):
+def save_clean_pdb_single_chains(pdb_path, pdb_name, bscore, outdir):
     class Clean_Chain(Select):
         def __init__(self, score, chain=None):
             self.bscore = bscore
@@ -424,7 +432,7 @@ def save_pdb(pdb_path, pdb_name, bscore, outdir):
             else:
                 self.letter = atom.get_full_id()[3][2]
                 if atom.get_full_id()[3][2] not in (self.prev_letter, " "):
-                    log.info(
+                    log.debug(
                         f"A residue with lettered numbering was found ({atom.get_full_id()[3][1]}{atom.get_full_id()[3][2]}). This may mess up visualisation."
                     )
                     self.letter_correction += 1
@@ -467,7 +475,7 @@ def save_pdb(pdb_path, pdb_name, bscore, outdir):
             io_w_no_h.save(f, Clean_Chain(bscore, chain))
 
 
-def fetch_and_process_from_list_file(list_file, out_dir):
+def fetch_list_file_extract_single_chains(list_file, out_dir):
     """Fetch and process PDB chains/UniProt entries from list input"""
 
     with open(list_file, "r") as f:
@@ -484,13 +492,13 @@ def fetch_and_process_from_list_file(list_file, out_dir):
 
     for i, prot_id in enumerate(pdb_list):
         if os.path.exists(f"{out_dir}/{prot_id}.pdb"):
-            log.info(
+            log.debug(
                 f"PDB {i+1} / {len(pdb_list)} ({prot_id}) already present: {out_dir}/{prot_id}.pdb"
             )
             continue
 
         else:
-            log.info(f"Fetching {i+1}/{len(pdb_list)}: {prot_id}")
+            log.debug(f"Fetching {i+1}/{len(pdb_list)}: {prot_id}")
 
         if args.struc_type == "alphafold":
             URL = f"https://alphafold.ebi.ac.uk/files/AF-{prot_id}-F1-model_v4.pdb"
@@ -529,9 +537,12 @@ def fetch_and_process_from_list_file(list_file, out_dir):
             )
             sys.exit(1)
 
-        save_pdb(
+        save_clean_pdb_single_chains(
             pdb_path=f"{out_dir}/temp", pdb_name=prot_id, bscore=bscore, outdir=out_dir
         )
+
+    # Finally return list of PDB files
+    return pdb_list
 
 
 def get_basename_no_ext(filepath):
@@ -552,7 +563,7 @@ def get_directory_basename_dict(directory: str, glob_ext: str) -> dict:
     return {get_basename_no_ext(fp): fp for fp in dir_list}
 
 
-def check_missing_output_files(in_dir, out_dir) -> None:
+def report_pdb_input_outputs(pdb_list, in_dir, out_dir) -> None:
     """Reports missing CSV and PDB file in out_dir, per PDB file in in_dir"""
 
     in_pdbs = glob.glob(f"{in_dir}/*.pdb")
@@ -561,10 +572,15 @@ def check_missing_output_files(in_dir, out_dir) -> None:
     in_dict = {Path(pdb).stem: pdb for pdb in in_pdbs}
     out_dict = {re.sub(r"_discotope3$", "", Path(pdb).stem): pdb for pdb in out_pdbs}
 
+    # Report number of input vs outputs
+    log.info(
+        f"Successfully predicted {len(out_pdbs)} / {len(in_pdbs)} single PDB chain(s) from {len(pdb_list)} input PDBs, saved to {args.out_dir}/output"
+    )
+
     missing_pdbs = in_dict.keys() - out_dict.keys()
     if len(missing_pdbs) >= 1:
-        log.error(
-            f"Error: Missing predictions for the following PDB(s) (check error log):\n{', '.join(missing_pdbs)}"
+        log.info(
+            f"Missing predictions for the following PDB chain(s) (see log file):\n{', '.join(missing_pdbs)}"
         )
 
 
@@ -582,7 +598,7 @@ def zip_folder_timeout(in_dir, out_dir, timeout_seconds=60) -> str:
         output = subprocess.run(
             bashCommand, timeout=timeout_seconds, capture_output=True, shell=True
         )
-        log.info(output.stdout.decode())
+        log.debug(output.stdout.decode())
         return file_name
 
     except subprocess.TimeoutExpired:
@@ -590,143 +606,171 @@ def zip_folder_timeout(in_dir, out_dir, timeout_seconds=60) -> str:
         sys.exit(1)
 
 
+def print_HTML_output_webpage(dataset, out_dir, out_zip) -> None:
+    """Hardcoded HTML output for download links to results"""
+
+    # Variables for HTML printing
+    web_prefix = "/".join(f"{out_dir}/output".rsplit("/", 5)[1:])
+    out_zip = f"{web_prefix}/{out_zip}"
+
+    examples = """<script type="text/javascript">const examples = ["""
+    structures = """<script type="text/javascript">const structures = ["""
+
+    # Header
+    print("</span></div></div></div>")
+    print("<h2>Output download</h2>")
+    print(
+        f'<a href="/{out_zip}"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
+    )
+
+    # Collapsible box for individual results
+    print(
+        """<div class="wrap-collabsible">
+        <input id="collapsible-1" class="toggle" type="checkbox">
+        <label for="collapsible-1" class="lbl-toggle">Individual result downloads</label>
+        <div class="collapsible-content">
+        <div class="content-inner">
+        """
+    )
+
+    # Add individual results
+    for i, sample in enumerate(dataset):
+        # Only include present PDBs
+        if not type(sample["X_arr"]):
+            continue
+
+        else:
+            out_pdb = f"{web_prefix}/{sample['pdb_id']}_discotope3.pdb"
+            out_csv = f"{web_prefix}/{sample['pdb_id']}_discotope3.csv"
+
+            examples += "{"
+            examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/{out_pdb}',info:'Structure {i+1}'"
+            examples += "},"
+            structures += "`"
+            with open(
+                f"{args.out_dir}/output/{sample['pdb_id']}_discotope3.pdb", "r"
+            ) as f:
+                structures += f.read()
+            structures += "`,"
+
+            style = ' style="margin-top:1em;"' if i > 0 else ""
+            print(f"<h3{style}>{sample['pdb_id']}</h3>")
+            print(
+                f'<a href="/{out_pdb}"><span>Download PDB w/ DiscoTope-3.0 prediction scores</span></a>'
+            )
+            print(f'<a href="/{out_csv}"><span>Download CSV</span></a> <br>')
+
+    # End of collapsible box
+    print("</div></div></div>")
+    examples += "];</script>"
+    structures += "];</script>"
+    print(examples)
+    print(structures)
+
+
 def main(args):
     """Main function"""
 
-    # Create temporary directory
-    with tempfile.TemporaryDirectory() as tempdir:
-        input_chains_dir = f"{args.out_dir}/input_chains"
-        os.makedirs(input_chains_dir, exist_ok=True)
+    # Directory for input single chains (extracted from input PDBs) and output CSV/PDB results
+    input_chains_dir = f"{args.out_dir}/input_chains"
+    out_dir = f"{args.out_dir}/output"
 
-        # Set B-factor / pLDDT column to 100 for solved structures, leave as is for AF2 structures
-        if args.struc_type == "alphafold":
-            bscore = 100
-        else:
-            bscore = None
+    os.makedirs(input_chains_dir, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
 
-        # 1. Download PDBs from RCSB or AlphaFoldDB
-        if args.list_file:
-            log.info(f"Fetching PDBs")
-            fetch_and_process_from_list_file(args.list_file, input_chains_dir)
+    # Set B-factor / pLDDT column to 100 for solved structures, leave as is for AF2 structures
+    if args.struc_type == "alphafold":
+        bscore = 100
+    else:
+        bscore = None
 
-        # 2. Unzip if ZIP, else single PDB
-        if args.pdb_or_zip_file:
-            if true_if_zip(args.pdb_or_zip_file):
-                log.info(f"Unzipping PDBs")
+    # Prepare input PDBs by extracting single chains to input_chains_dir
+    # Nb: After check_valid_inputs, only one of [pdb_or_zip_file, list_file, pdb_dir] is set
+
+    # 1. Download PDBs from RCSB or AlphaFoldDB
+    if args.list_file:
+        log.debug(f"Fetching PDBs")
+        pdb_list = fetch_list_file_extract_single_chains(
+            args.list_file, input_chains_dir
+        )
+
+    # Check whether input file is a compressed ZIP file or single PDB
+    if args.pdb_or_zip_file:
+        # 2. If ZIP, unzip and extract single chains
+        if true_if_zip(args.pdb_or_zip_file):
+            log.debug(f"Unzipping PDBs")
+
+            # Temporary directory for zip output, delete after extract/saving single chains
+            with tempfile.TemporaryDirectory() as tempdir:
                 zf = ZipFile(args.pdb_or_zip_file)
                 zf.extractall(tempdir)
 
-                for f in glob.glob(f"{tempdir}/*.pdb"):
+                pdb_list = glob.glob(f"{tempdir}/*.pdb")
+                for f in pdb_list:
                     pdb_name = get_basename_no_ext(f)
-                    save_pdb(f, pdb_name, bscore, input_chains_dir)
+                    save_clean_pdb_single_chains(f, pdb_name, bscore, input_chains_dir)
 
-            # 3. If single PDB, copy to tempdir
-            else:
-                f = args.pdb_or_zip_file
-                pdb_name = get_basename_no_ext(f)
-                save_pdb(f, pdb_name, bscore, input_chains_dir)
+        # 3. If single PDB, copy to tempdir
+        else:
+            f = args.pdb_or_zip_file
+            pdb_name = get_basename_no_ext(f)
+            pdb_list = [pdb_name]
+            save_clean_pdb_single_chains(f, pdb_name, bscore, input_chains_dir)
 
-        # 4. Load from PDB folder
-        if args.pdb_dir:
-            for f in glob.glob(f"{args.pdb_dir}/*.pdb"):
-                pdb_name = get_basename_no_ext(f)
-                save_pdb(f, pdb_name, bscore, input_chains_dir)
+    # 4. Load from PDB folder
+    if args.pdb_dir:
+        pdb_list = glob.glob(f"{args.pdb_dir}/*.pdb")
+        for f in pdb_list:
+            pdb_name = get_basename_no_ext(f)
+            save_clean_pdb_single_chains(f, pdb_name, bscore, input_chains_dir)
 
-        # Embed and predict
-        log.info(f"Pre-processing PDBs")
-        dataset = Discotope_Dataset_web(
-            input_chains_dir,
-            structure_type=args.struc_type,
-            check_existing=args.check_existing,
-            save_embeddings=args.save_embeddings,
-            max_gpu_pdb_length=args.max_gpu_pdb_length,
-            verbose=args.verbose,
-        )
-        if len(dataset) == 0:
-            log.error("Error: No PDB files were valid.")
-            sys.exit(1)
+    # Embed end process PDB features
+    log.debug(f"Pre-processing PDBs")
+    dataset = Discotope_Dataset_web(
+        input_chains_dir,
+        structure_type=args.struc_type,
+        check_existing=args.check_existing,
+        save_embeddings=args.save_embeddings,
+        cpu_only=args.cpu_only,
+        max_gpu_pdb_length=args.max_gpu_pdb_length,
+        verbose=args.verbose,
+    )
+    if len(dataset) == 0:
+        log.error("Error: No PDB files were valid. Please check input PDBs.")
+        sys.exit(1)
 
-        # Load pre-trained XGBoost models
-        models = load_models(args.models_dir, num_models=100)
+    # Load pre-trained XGBoost models
+    models = load_models(args.models_dir, num_models=100)
 
-        # Predict and save
-        predict_and_save(
-            models,
-            dataset,
-            input_chains_dir,
-            out_dir=f"{args.out_dir}/output",
-            verbose=args.verbose,
-        )
+    # Predict and save
+    predict_and_save(
+        models,
+        dataset,
+        input_chains_dir,
+        out_dir=out_dir,
+        verbose=args.verbose,
+    )
 
-        # Print if any PDB outputs are missing
-        check_missing_output_files(input_chains_dir, f"{args.out_dir}/output")
+    # Print if any PDB input / output summary, and any missing PDBs
+    report_pdb_input_outputs(pdb_list, input_chains_dir, out_dir)
 
-        # If web server mode, print HTML and zip output folder
-        if args.web_server_mode:
-            log.info(f"Compressing ZIP file")
-            out_zip = zip_folder_timeout(
-                in_dir=f"{args.out_dir}/output", out_dir=f"{args.out_dir}/output"
-            )
+    # If web server mode, prepare downloadable zip and results HTML page
+    if args.web_server_mode:
+        # Prepare downloadable zip, store in same output directory
+        log.debug(f"Compressing ZIP file")
+        out_zip = zip_folder_timeout(in_dir=out_dir, out_dir=out_dir)
 
-            # HTML printing
-            web_prefix = "/".join(f"{args.out_dir}/output".rsplit("/", 5)[1:])
-            out_zip = f"{web_prefix}/{out_zip}"
-
-            examples = """<script type="text/javascript">const examples = ["""
-            structures = """<script type="text/javascript">const structures = ["""
-
-            print("</span></div></div></div>")
-            print("<h2>Output download</h2>")
-            print(
-                f'<a href="/{out_zip}"><p>Download DiscoTope-3.0 prediction results as zip</p></a>'
-            )
-
-            print(
-                """<div class="wrap-collabsible">
-                <input id="collapsible-1" class="toggle" type="checkbox">
-                <label for="collapsible-1" class="lbl-toggle">Individual result downloads</label>
-                <div class="collapsible-content">
-                <div class="content-inner">
-                """
-            )
-
-            for i, sample in enumerate(dataset):
-                # Only include present PDBs
-                if not type(sample["X_arr"]):
-                    continue
-
-                else:
-                    out_pdb = f"{web_prefix}/{sample['pdb_id']}_discotope3.pdb"
-                    out_csv = f"{web_prefix}/{sample['pdb_id']}_discotope3.csv"
-
-                    examples += "{"
-                    examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/{out_pdb}',info:'Structure {i+1}'"
-                    examples += "},"
-                    structures += "`"
-                    with open(
-                        f"{args.out_dir}/output/{sample['pdb_id']}_discotope3.pdb", "r"
-                    ) as f:
-                        structures += f.read()
-                    structures += "`,"
-
-                    style = ' style="margin-top:1em;"' if i > 0 else ""
-                    print(f"<h3{style}>{sample['pdb_id']}</h3>")
-                    print(
-                        f'<a href="/{out_pdb}"><span>Download PDB w/ DiscoTope-3.0 prediction scores</span></a>'
-                    )
-                    print(f'<a href="/{out_csv}"><span>Download CSV</span></a> <br>')
-
-            print("</div></div></div>")
-            examples += "];</script>"
-            structures += "];</script>"
-            print(examples)
-            print(structures)
+        # Prints per single chain result download links and HTML output
+        # Skips over any PDBs that are missing results
+        log.debug(f"Printing HTML output")
+        print_HTML_output_webpage(dataset, out_dir, out_zip)
 
 
 if __name__ == "__main__":
     args = cmdline_args()
     os.makedirs(f"{args.out_dir}/output/", exist_ok=True)
 
+    # Log to file and stdout
     log_path = os.path.abspath(f"{args.out_dir}/output/log.txt")
     logging.basicConfig(
         level=logging.ERROR,
@@ -742,25 +786,26 @@ if __name__ == "__main__":
     # Error messages if invalid input
     check_valid_input(args)
 
-    # Web_server_mode only print errors
+    # ERROR only prints errors
     if args.web_server_mode:
         logging.getLogger().setLevel(logging.ERROR)
 
-    # Verbose logging setting
+    # INFO only prints total summary and errors (default)
     elif args.verbose == 1:
         logging.getLogger().setLevel(logging.INFO)
 
+    # DEBUG prints every major step
     elif args.verbose >= 2:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # Exclude deprecation warnings
+    # Exclude deprecation warnings (from Biopython, etc.)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
         try:
-            log.info("Predicting PDBs using Discotope-3.0")
+            log.debug("Predicting PDBs using Discotope-3.0")
             main(args)
-            log.info("Done!")
+            log.debug("Done!")
 
         except Exception as E:
             log.exception(

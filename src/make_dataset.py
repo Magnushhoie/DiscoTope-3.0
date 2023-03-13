@@ -133,6 +133,7 @@ def load_IF1_tensors(
     pdb_files: List,
     check_existing=True,
     save_embeddings=True,
+    cpu_only=False,
     max_gpu_pdb_length: int = 1000,
     verbose: int = 0,
 ) -> List:
@@ -145,37 +146,61 @@ def load_IF1_tensors(
     model, alphabet = esm.pretrained.esm_if1_gvp4_t16_142M_UR50()
     model = model.eval()
 
-    # Check device
+    # Lists containing final output for each PDB
     list_IF1_tensors = []
     list_structures = []
     list_sequences = []
     for i, pdb_path in enumerate(pdb_files):
+        # Get PDB name
         _pdb = get_basename_no_ext(pdb_path)
 
+        # Try to extract backbone, or skip
         try:
-            # structure = esm.inverse_folding.util.load_structure()
             structure, structure_full = load_structure_discotope(
                 str(pdb_path), chain=None
             )
+        except Exception as E:
+            log.error(f"Note: No amino-acid backbone found in {_pdb}")
+            log.debug(f"Error: {E}")
+            list_IF1_tensors.append(False)
+            list_structures.append(False)
+            list_sequences.append(False)
+            continue
 
+        # Try to extract C, Ca, N atoms and sequence, or skip
+        try:
             coords, seq = esm_util_custom.extract_coords_from_structure(structure)
 
-            # Load if already exists
-            embed_file = re.sub(r".pdb$", ".pt", pdb_path)
-            if check_existing and os.path.exists(embed_file):
-                log.info(
-                    f"{i+1} / {len(pdb_files)}: Loading existing embedding file for {_pdb}: {embed_file}"
-                )
-                rep = torch.load(embed_file)
+        except Exception as E:
+            log.error(
+                f"Error: Unable to extract valid amino-acid sequence / backbone from {_pdb}"
+            )
+            log.debug(f"Error: {E}")
+            list_IF1_tensors.append(False)
+            list_structures.append(False)
+            list_sequences.append(False)
+            continue
 
-            # Else, embed
-            else:
-                log.info(f"{i+1} / {len(pdb_files)}: Embedding {_pdb}")
+        # Load IF1 tensor if already exists and flag is set (default always embed from scratch)
+        embed_file = re.sub(r".pdb$", ".pt", pdb_path)
+        if check_existing and os.path.exists(embed_file):
+            log.debug(
+                f"{i+1} / {len(pdb_files)}: Loading existing embedding file for {_pdb}: {embed_file}"
+            )
+            rep = torch.load(embed_file)
 
-                # Embed on CPU if PDB is too large (>= 1000 residues)
+        # Else, embed PDB from scratch
+        else:
+            log.debug(f"{i+1} / {len(pdb_files)}: Embedding {_pdb}")
+
+            # Try to embed on CPU/GPU and save
+            try:
+                # Embed on GPU if available, unless sequence length > (1000) or cpu_only flag is set
                 device = torch.device(
                     "cuda"
-                    if torch.cuda.is_available() and len(seq) < max_gpu_pdb_length
+                    if torch.cuda.is_available()
+                    and len(seq) < max_gpu_pdb_length
+                    and not cpu_only
                     else "cpu"
                 )
 
@@ -188,24 +213,24 @@ def load_IF1_tensors(
                 )
 
                 if save_embeddings:
-                    log.info(f"Saving {embed_file}")
+                    log.debug(f"Saving {embed_file}")
                     torch.save(rep, embed_file)
 
+            except Exception as E:
+                log.error(
+                    f"Error: Unable to embed {_pdb}. Out of GPU memory? Consider using --cpu_only flag or setting --max_gpu_pdb_length lower (default 1000)"
+                )
+                log.debug(f"Error: {E}")
+                traceback.print_exc()
+                list_IF1_tensors.append(False)
+                list_structures.append(False)
+                list_sequences.append(False)
+                continue
+
+            # If everything succeeded, append values
             list_IF1_tensors.append(rep)
             list_structures.append(structure_full)
             list_sequences.append(seq)
-
-        except Exception as E:
-            log.error(
-                f"Error: Biotite/ESM-IF1 unable to process chain {_pdb}. No present amino-acid backbone atoms?"
-            )
-
-            if verbose >= 1:
-                traceback.print_exc()
-
-            list_IF1_tensors.append(False)
-            list_structures.append(False)
-            list_sequences.append(False)
 
     return list_IF1_tensors, list_structures, list_sequences
 
@@ -235,7 +260,7 @@ def load_structure_discotope(fpath, chain=None):
                 pdbf = pdb.PDBFile.read(fin)
                 structure_full = pdbf.get_structure(model=1, extra_fields=["b_factor"])
             except Exception as E:
-                log.info(f"Unable to read PDB file {fpath}: {E}")
+                log.error(f"Unable to read PDB file {fpath}: {E}")
 
     bbmask = filter_backbone(structure_full)
     structure = structure_full[bbmask]
@@ -333,19 +358,18 @@ def embed_pdbs_IF1(
         if os.path.exists(outpath) and not overwrite_embeddings:
             if verbose:
                 exist_count += 1
-                # log.info(f"Skipping embedding {pdb_path}, already exists")
+                # log.debug(f"Skipping embedding {pdb_path}, already exists")
 
         else:
-            log.info(f"{i+1} / {len(pdb_paths)}: Embedding {pdb_path} using ESM-IF1")
+            log.debug(f"{i+1} / {len(pdb_paths)}: Embedding {pdb_path} using ESM-IF1")
 
             chain_id = None
 
             # Extract representation
-            # structure = esm.inverse_folding.util.load_structure(str(pdb_path), chain_id)
             try:
                 structure, _ = load_structure_discotope(pdb_path, chain_id)
             except Exception as E:
-                log.info(f"Unable to load structure, retrying with IF1 logic\n:{E}")
+                log.error(f"Unable to load structure, retrying with IF1 logic\n:{E}")
                 structure = esm.inverse_folding.util.load_structure(
                     str(pdb_path), chain_id
                 )
@@ -353,7 +377,7 @@ def embed_pdbs_IF1(
             coords, seq = esm_util_custom.extract_coords_from_structure(structure)
 
             if verbose:
-                log.info(f"PDB {pdb}, IF1: {len(seq)} residues")
+                log.debug(f"PDB {pdb}, IF1: {len(seq)} residues")
 
             # Embed on CPU if PDB is too large (>= 1000 residues)
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -362,14 +386,14 @@ def embed_pdbs_IF1(
                 device = "cpu"
 
             # Save representation to file
-            log.info(f"ESM-IF1: Not including confidence")
+            log.debug(f"ESM-IF1: Not including confidence")
             confidence = None
             rep = esm_util_custom.get_encoder_output(
                 model, alphabet, coords, confidence, seq, device
             )
             torch.save(rep, outpath)
 
-    log.info(
+    log.debug(
         f"Skipped embedding {exist_count} / {len(pdb_paths)} PDBs (already exists)"
     )
 
@@ -410,7 +434,7 @@ def map_3letter_to_1letter(res_names: np.array):
     if "X" in np.unique(seq):
         idxs = np.where(seq == "X")[0]
         unknown_res = np.unique(res_names[idxs])
-        log.info(f"Unknown residues found in PDB: {unknown_res}")
+        log.error(f"Unknown residues found in PDB: {unknown_res}")
 
     return seq
 
@@ -533,6 +557,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
         check_existing: bool = False,  # Try to load previous embedding files
         save_embeddings: bool = False,  # Save new embedding files
         preprocess: bool = True,
+        cpu_only: bool = False,
         max_gpu_pdb_length: int = 1000,
         n_jobs: int = 1,
         verbose: int = 0,
@@ -543,6 +568,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
         self.structure_type = structure_type
         self.check_existing = check_existing
         self.save_embeddings = save_embeddings
+        self.cpu_only = cpu_only
         self.max_gpu_pdb_length = max_gpu_pdb_length
 
         # Get PDB path dict
@@ -551,7 +577,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
             log.error(f"No .pdb files found in {pdb_dir}")
             sys.exit(0)
 
-        log.info(f"Read {len(self.list_pdb_files)} PDBs from {pdb_dir}")
+        log.debug(f"Read {len(self.list_pdb_files)} PDBs from {pdb_dir}")
 
         if self.preprocess:
             # Read in IF1 tensors
@@ -563,6 +589,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
                 self.list_pdb_files,
                 check_existing=self.check_existing,
                 save_embeddings=self.save_embeddings,
+                cpu_only=self.cpu_only,
                 max_gpu_pdb_length=self.max_gpu_pdb_length,
             )
 
@@ -625,7 +652,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
         # Get PDB filepath from PDB id and PDB directory
         pdb_fp = self.list_pdb_files[idx]
         pdb_id = get_basename_no_ext(pdb_fp)
-        log.info(f"Processing {idx+1} / {len(self.list_pdb_files)}: PDB {pdb_id}")
+        log.debug(f"Processing {idx+1} / {len(self.list_pdb_files)}: PDB {pdb_id}")
 
         try:
             # Read variables
@@ -638,7 +665,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
                 or type(struc_full) is bool
                 or type(seq) is bool
             ):
-                log.info(f"Previously failed to pre-process {pdb_id}, skipping ...")
+                log.debug(f"Previously failed to pre-process {pdb_id}, skipping ...")
                 return False
 
             seq_onehot = self.one_hot_encode_sequence(seq)
@@ -738,7 +765,7 @@ def main(args):
     os.makedirs(args.out_dir, exist_ok=True)
 
     if not args.skip_embeddings:
-        log.info(f"Loading ESM-IF1 to embed PDBs")
+        log.debug(f"Loading ESM-IF1 to embed PDBs")
         embed_pdbs_IF1(
             args.pdb_dir,
             out_dir=args.pdb_dir,
@@ -748,7 +775,7 @@ def main(args):
             verbose=args.verbose,
         )
 
-    log.info(f"Pre-processing PDBs")
+    log.debug(f"Pre-processing PDBs")
     dataset = Discotope_Dataset_web(
         pdb_dir=args.pdb_dir, structure_type=args.struc_type, verbose=args.verbose
     )
@@ -757,7 +784,7 @@ def main(args):
     )
     torch.save(dataset, f"{args.out_dir}/dataset.pt")
 
-    log.info(f"Done!")
+    log.debug(f"Done!")
 
 
 if __name__ == "__main__":
