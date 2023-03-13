@@ -95,7 +95,7 @@ conda install -c conda-forge py-xgboost-gpu
 
 # Demo
 
-On a common workstation with a GPU, predictions takes ~ 2 seconds per PDB chain with ~ 15 seconds for loading needed libraries and model weight. Ensure XGBoost model weights are unzipped by first running 'unzip models.zip' (see [Installation Guide](#installation-guide)). ESM-IF1 weights will be automatically downloaded the first time the prediction script is run (~ 1 min)
+On a common workstation with a GPU, predictions takes <1 second per PDB chain with ~ 15 seconds for loading needed libraries and model weight. Ensure XGBoost model weights are unzipped by first running 'unzip models.zip' (see [Installation Guide](#installation-guide)). ESM-IF1 weights will be automatically downloaded the first time the prediction script is run (~ 1 min)
 
 ## Predict a single PDB (solved structure)
 
