@@ -611,7 +611,7 @@ def print_HTML_output_webpage(dataset, out_dir, out_zip) -> None:
     """Hardcoded HTML output for download links to results"""
 
     # Variables for HTML printing
-    web_prefix = "/".join(f"{out_dir}/output".rsplit("/", 5)[1:])
+    web_prefix = "/".join(f"{out_dir}".rsplit("/", 5)[1:])
     out_zip = f"{web_prefix}/{out_zip}"
 
     examples = """<script type="text/javascript">const examples = ["""
