@@ -121,7 +121,7 @@ python src/predict_webserver.py \
     )
 
     p.add_argument(
-        "--check_existing_emeddings",
+        "--check_existing_embeddings",
         default=False,
         help="Check for existing embeddings to load in pdb_dir",
     )
@@ -757,7 +757,7 @@ def main(args):
     dataset = Discotope_Dataset_web(
         input_chains_dir,
         structure_type=args.struc_type,
-        check_existing_embeddings=args.check_existing_emeddings,
+        check_existing_embeddings=args.check_existing_embeddings,
         save_embeddings=args.save_embeddings,
         cpu_only=args.cpu_only,
         max_gpu_pdb_length=args.max_gpu_pdb_length,
