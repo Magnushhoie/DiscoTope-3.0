@@ -2,7 +2,12 @@
 *.pdb
 *.pt
 old/
+notebooks/
 temp/
+models2/
+output/
+output2/
+data2/
 
 # Added
 !*.dvc

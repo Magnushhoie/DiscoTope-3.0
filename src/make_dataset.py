@@ -26,7 +26,6 @@ import torch
 # Use Sander values instead
 from biotite.structure import filter_amino_acids, filter_backbone, get_chains
 from biotite.structure.io import pdb, pdbx
-from biotite.structure.residues import get_residues
 from joblib import Parallel, delayed
 
 import esm_util_custom
@@ -160,8 +159,14 @@ def load_IF1_tensors(
                 str(pdb_path), chain=None
             )
         except Exception as E:
-            log.error(f"Note: Skipping {_pdb}, no valid amino-acid backbone found")
+            log.error(
+                f"Note: Skipping {_pdb}, ESM-IF1 unable to extract valid amino-acid backbone"
+            )
             log.debug(f"Error: {E}")
+
+            if verbose >= 2:
+                traceback.print_exc()
+
             list_IF1_tensors.append(False)
             list_structures.append(False)
             list_sequences.append(False)
@@ -432,7 +437,7 @@ def map_3letter_to_1letter(res_names: np.array):
         "TYR": "Y",
     }
 
-    # Map 3-letter to 1-letter residue names
+    # Map 3-letter to 1-letter residue namesfunknown
     seq = pd.Series(res_names).map(mapping, na_action="ignore").values
 
     # Map unkonwn residues to 'X'
@@ -440,12 +445,15 @@ def map_3letter_to_1letter(res_names: np.array):
 
     # Check for mismatches
     if "X" in np.unique(seq):
-        # Get PDB id from outside function
-        global pdb_id
-
         idxs = np.where(seq == "X")[0]
         unknown_res = np.unique(res_names[idxs])
-        log.error(f"Unknown residues found in PDB {pdb_id}: {unknown_res}")
+
+        # Print pdb_id if available
+        global pdb_id
+        if "pdb_id" in globals():
+            log.error(f"Unknown residues found for pdb_id {pdb_id}: {unknown_res}")
+        else:
+            log.error(f"Unknown residues found: {unknown_res}")
 
     return seq
 
@@ -457,13 +465,19 @@ def get_atomarray_seq_residx(
     Returns sequence and residue indices for an atom array
     """
 
-    # Get residue indices and 3-letter encoding
-    res_idxs, res_names = get_residues(atom_array)
+    def get_res_idxs_names_chains(array):
+        """Get the residue IDs and names of an atom array (stack)."""
+        starts = biotite.structure.residues.get_residue_starts(array)
+
+        return array.res_id[starts], array.res_name[starts], array.chain_id[starts]
+
+    # Get residue indices, 3-letter encoding and chain IDs
+    res_idxs, res_names, res_chains = get_res_idxs_names_chains(atom_array)
 
     # Maps 3-letter to 1-letter residue names, unknown to X
     seq = map_3letter_to_1letter(res_names)
 
-    return seq, res_idxs
+    return seq, res_idxs, res_chains
 
 
 def get_atomarray_res_sasa(atom_array):
@@ -497,7 +511,7 @@ def get_atomarray_bfacs(atom_array: biotite.structure.AtomArray) -> np.array:
     return res_bfacs
 
 
-def structure_extract_seq_residx_bfac_rsas_diam(struc_full, chain_id):
+def structure_extract_seq_residx_chain_bfac_rsas_diam(struc_full, chain_id):
     """
     Input:
         pdb_path: PDB file path (str)
@@ -512,7 +526,7 @@ def structure_extract_seq_residx_bfac_rsas_diam(struc_full, chain_id):
     # structure = pdbf.get_structure(model=1, extra_fields=["b_factor"])
     # _, struc_full = load_structure_discotope(pdb_path, chain_id)
 
-    seq, res_idxs = get_atomarray_seq_residx(struc_full)
+    seq, res_idxs, res_chains = get_atomarray_seq_residx(struc_full)
     bfacs = get_atomarray_bfacs(struc_full)
 
     # Convert SASA to RSA with Sander scale max values
@@ -525,7 +539,7 @@ def structure_extract_seq_residx_bfac_rsas_diam(struc_full, chain_id):
             f"Error: RSA values {len(rsa)} do not match length of backbone residues {len(seq)}"
         )
 
-    return seq, res_idxs, bfacs, rsa
+    return seq, res_idxs, res_chains, bfacs, rsa
 
 
 class Discotope_Dataset_web(torch.utils.data.Dataset):
@@ -658,6 +672,8 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
     def process_sample(self, idx):
         """Process individual pdb, sequence, ESM"""
 
+        global pdb_id
+
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
@@ -688,9 +704,12 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
             (
                 pdb_seq,
                 pdb_res_idxs,
+                pdb_res_chains,
                 pdb_bfacs,
                 pdb_rsas,
-            ) = structure_extract_seq_residx_bfac_rsas_diam(struc_full, chain_id=None)
+            ) = structure_extract_seq_residx_chain_bfac_rsas_diam(
+                struc_full, chain_id=None
+            )
 
             # Struc_type 1 and pLDDTs set to B-factors only if AlphaFold structure
             if self.structure_type == "alphafold":
@@ -726,6 +745,7 @@ class Discotope_Dataset_web(torch.utils.data.Dataset):
             df_stats = pd.DataFrame(
                 {
                     "pdb": pdb_id,
+                    "chain": pdb_res_chains,
                     "res_id": pdb_res_idxs,
                     "residue": list(seq),
                     "rsa": pdb_rsas.flatten(),

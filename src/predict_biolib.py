@@ -37,8 +37,11 @@ from Bio.PDB import PDBIO, Select
 from Bio.PDB.PDBParser import PDBParser
 
 from make_dataset import Discotope_Dataset_web
+from predict_webserver import (get_basename_no_ext,
+                               get_directory_basename_dict,
+                               predict_using_models, read_list_file,
+                               set_struc_res_bfactor, true_if_zip)
 
-from predict_webserver import read_list_file, get_directory_basename_dict, get_basename_no_ext, set_struc_res_bfactor, predict_using_models, true_if_zip
 
 def save_clean_pdb_single_chains(pdb_path, pdb_name, bscore, outdir):
     class Clean_Chain(Select):
@@ -114,6 +117,7 @@ def save_clean_pdb_single_chains(pdb_path, pdb_name, bscore, outdir):
         with open(pdb_out, "w") as f:
             print(*header, sep="\n", file=f)
             io_w_no_h.save(f, Clean_Chain(bscore, chain))
+
 
 def predict_and_save(models, dataset, pdb_dir, out_dir, verbose: int = 0) -> None:
     """Predicts and saves CSV/PDBs with DiscoTope-3.0 scores"""
@@ -197,6 +201,7 @@ def predict_and_save(models, dataset, pdb_dir, out_dir, verbose: int = 0) -> Non
         outfile = f"{out_dir}/{_pdb}_discotope3.pdb"
         strucio.save_structure(outfile, struc_pred)
 
+
 def load_models(
     models_dir: str,
     num_models: int = 100,
@@ -224,6 +229,7 @@ def load_models(
         models.append(m)
 
     return models
+
 
 def report_pdb_input_outputs(pdb_list, in_dir, out_dir) -> None:
     """Reports missing CSV and PDB file in out_dir, per PDB file in in_dir"""
@@ -266,6 +272,7 @@ def zip_folder_timeout(in_dir, out_dir, timeout_seconds=120) -> str:
     except subprocess.TimeoutExpired:
         log.error("Error: zip compression timed out")
         sys.exit(1)
+
 
 def fetch_pdbs_extract_single_chains(pdb_list, out_dir) -> None:
     """Fetch and process PDB chains/UniProt entries from list input"""
@@ -432,6 +439,7 @@ Options:
 
     return p.parse_args()
 
+
 def check_valid_input(args):
     """Checks for valid arguments"""
 
@@ -474,7 +482,7 @@ def check_valid_input(args):
         sys.exit(0)
 
     if true_if_list(args.list_or_pdb_or_zip_file):
-        return True # IS LIST FILE
+        return True  # IS LIST FILE
 
     # Check ZIP max-size, number of files
     if true_if_zip(args.list_or_pdb_or_zip_file):
@@ -490,11 +498,9 @@ def check_valid_input(args):
         # Check filenames end in .pdb
         name = file_names[0]
         if os.path.splitext(name)[-1] != ".pdb":
-            log.error(
-                f"Ensure all ZIP content file-names end in .pdb, found {name}"
-            )
+            log.error(f"Ensure all ZIP content file-names end in .pdb, found {name}")
             sys.exit(0)
-        return # IS NOT LIST FILE
+        return  # IS NOT LIST FILE
 
 
 def print_HTML_output_webpage(dataset, out_dir) -> None:
@@ -507,7 +513,6 @@ def print_HTML_output_webpage(dataset, out_dir) -> None:
     OUTPUT_HTML = ""
 
     for i, sample in enumerate(dataset):
-
         examples += "{"
         examples += f"id:'{sample['pdb_id']}',url:'{sample['pdb_id']}_discotope3.pdb',info:'Structure {i+1}'"
         examples += "},"
@@ -528,17 +533,23 @@ def print_HTML_output_webpage(dataset, out_dir) -> None:
     with open("/output.html", "w") as f:
         f.write(output_html_w_data)
 
+
 def true_if_list(infile):
     """Returns True if file header bits are zip file"""
     with open(infile, "rb") as f:
         first_line = f.readline().strip()
     PDB_REGEX = rb"^[0-9][A-Za-z0-9]{3}"
-    UNIPROT_REGEX = rb"^[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2}"
-    return (re.search(PDB_REGEX, first_line) is not None) or (re.search(UNIPROT_REGEX, first_line) is not None)
+    UNIPROT_REGEX = (
+        rb"^[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2}"
+    )
+    return (re.search(PDB_REGEX, first_line) is not None) or (
+        re.search(UNIPROT_REGEX, first_line) is not None
+    )
+
 
 def main(args):
     """Main function"""
-    
+
     # Error messages if invalid input
     is_list_file = check_valid_input(args)
 
@@ -642,12 +653,14 @@ def main(args):
 if __name__ == "__main__":
     args = cmdline_args()
     os.makedirs(f"{args.out_dir}/output/", exist_ok=True)
-    
+
     # Load ESM-IF1 from LFS
     ESM_MODEL_DIR = "/root/.cache/torch/hub/checkpoints/"
     ESM_MODEL_FILE = "esm_if1_gvp4_t16_142M_UR50.pt"
     os.makedirs(ESM_MODEL_DIR, exist_ok=True)
-    os.symlink(f"{args.models_dir}/{ESM_MODEL_FILE}", f"{ESM_MODEL_DIR}/{ESM_MODEL_FILE}")
+    os.symlink(
+        f"{args.models_dir}/{ESM_MODEL_FILE}", f"{ESM_MODEL_DIR}/{ESM_MODEL_FILE}"
+    )
 
     # Log to file and stdout
     # If verbose == 0, only errors are printed (default 1)
