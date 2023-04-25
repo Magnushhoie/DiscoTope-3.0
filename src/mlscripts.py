@@ -222,6 +222,52 @@ def extract_pdb(pdb, X_test, y_test, df_test):
 
     return X_test[m], y_test[m], df_test[m]
 
+def normalize_scores_load_models(
+    df, 
+    score_col: str = "DiscoTope-3.0_score",
+    len_col: str = "length",
+    models_dir="models",
+    ) -> np.array:
+    """Loads model and normalizes scores"""
+
+    # Load GAMs to normalize scores by length and surface area
+    gam_len_to_mean = load_gam_model(f"{models_dir}/gam_len_to_mean.pkl")
+    gam_surface_to_std = load_gam_model(
+        f"{models_dir}/gam_surface_to_std.pkl"
+    )
+
+    Z_scores = normalize_scores(df, gam_len_to_mean, gam_surface_to_std)
+
+    return Z_scores
+
+def normalize_scores(
+    df: pd.DataFrame,
+    gam_len_to_mean: "pygam.pygam.LinearGAM",
+    gam_surface_to_std: "pygam.pygam.LinearGAM",
+    score_col: str = "DiscoTope-3.0_score",
+    len_col: str = "length",
+) -> np.array:
+    """Z-score normalize scores using fitted GAMs on mean and std"""
+
+    # Parameters
+    scores = df[score_col].astype(float).values
+    length = int(df[len_col].iloc[0])
+    mean_surface_score = scores[df["rsa"].astype(float) >= 0.20].mean()
+
+    # Predict
+    u = gam_len_to_mean.predict(length)
+    std = gam_surface_to_std.predict(mean_surface_score)
+    z_scores = (scores - u) / std
+
+    return z_scores
+
+def load_gam_model(model_path):
+    """Loads GAM model from model_path"""
+
+    with open(model_path, "rb") as f:
+        gam_model = pickle.load(f)
+
+    return gam_model
 
 def predict_test_pdb(pdb, models):
     """Get output testing df using saved models"""

@@ -123,17 +123,17 @@ python src/predict_webserver.py \
     )
 
     p.add_argument(
-        "--z_score_epi_threshold",
+        "--calibrated_score_epi_threshold",
         type=float,
-        help="Z-score threshold for epitopes (default 0.90)",
+        help="Calibrated-score threshold for epitopes [low 0.40, moderate (0.90), higher 1.50]",
         default=0.90,
     )
 
     p.add_argument(
-        "--no_z_normalization",
+        "--no_calibrated_normalization",
         action="store_true",
         default=False,
-        help="Skip Z-normalization of PDBs",
+        help="Skip Calibrated-normalization of PDBs",
     )
 
     p.add_argument(
@@ -351,7 +351,7 @@ def normalize_scores(
     score_col: str = "DiscoTope-3.0_score",
     len_col: str = "length",
 ) -> np.array:
-    """Z-score normalize scores using fitted GAMs on mean and std"""
+    """Calibrated-score normalize scores using fitted GAMs on mean and std"""
 
     # Parameters
     scores = df[score_col].astype(float).values
@@ -361,9 +361,9 @@ def normalize_scores(
     # Predict
     u = gam_len_to_mean.predict(length)
     std = gam_surface_to_std.predict(mean_surface_score)
-    z_scores = (scores - u) / std
+    calibrated_scores = (scores - u) / std
 
-    return z_scores
+    return calibrated_scores
 
 
 def predict_and_save(
@@ -373,8 +373,8 @@ def predict_and_save(
     out_dir,
     gam_len_to_mean=False,
     gam_surface_to_std=False,
-    z_score_epi_threshold=0.90,
-    no_z_normalization=False,
+    calibrated_score_epi_threshold=0.90,
+    no_calibrated_normalization=False,
     verbose: int = 0,
 ) -> None:
     """Predicts and saves CSV/PDBs with DiscoTope-3.0 scores"""
@@ -400,7 +400,7 @@ def predict_and_save(
         ]
     )
     df_all.insert(4, "DiscoTope-3.0_score", y_all)
-    df_all.insert(5, "Z_score", np.nan)
+    df_all.insert(5, "calibrated_score", np.nan)
     df_all.insert(6, "epitope", np.nan)
 
     # Round numerical columns to 5 digits for nicer CSV output
@@ -449,28 +449,28 @@ def predict_and_save(
         df = df_all.iloc[start:end]
         start = end
 
-        # Normalize for length and surface area with Z-scores
-        z_scores = normalize_scores(df, gam_len_to_mean, gam_surface_to_std)
+        # Normalize for length and surface area with Calibrated-scores
+        calibrated_scores = normalize_scores(df, gam_len_to_mean, gam_surface_to_std)
 
-        # Epitopes can now be set by fixed threshold, default median epitope Z-score (0.90)
+        # Epitopes can now be set by fixed threshold, default median epitope Calibrated-score (0.90)
         # Nb: All residue median 0.00, exposed 0.50, exposed epitope 0.90
-        df["epitope"] = z_scores >= z_score_epi_threshold
+        df["epitope"] = calibrated_scores >= calibrated_score_epi_threshold
 
-        # Set Z-scores to string for nicer CSV output
-        df["Z_score"] = pd.Series(z_scores).apply(lambda x: "{:.5f}".format(x))
+        # Set Calibrated-scores to string for nicer CSV output
+        df["calibrated_score"] = pd.Series(calibrated_scores).apply(lambda x: "{:.5f}".format(x))
 
         # Save CSV
         outfile = f"{out_dir}/{_pdb}_discotope3.csv"
         df.to_csv(outfile, index=False)
 
-        # Save PDB with or without Z-normalized scores
-        if no_z_normalization:
+        # Save PDB with or without Calibrated-normalized scores
+        if no_calibrated_normalization:
             struc_pred = set_struc_res_bfactor(
                 struc, df["DiscoTope-3.0_score"].values.astype(float) * 100
             )
         else:
             struc_pred = set_struc_res_bfactor(
-                struc, df["Z_score"].values.astype(float) * 100
+                struc, df["calibrated_score"].values.astype(float) * 100
             )
 
         outfile = f"{out_dir}/{_pdb}_discotope3.pdb"
@@ -802,6 +802,12 @@ def load_gam_model(model_path):
 def main(args):
     """Main function"""
 
+    # Log if multichain mode is set
+    if args.multichain_mode:
+        log.info(f"Multi-chain mode set, will predict PDBs as complexes")
+    else:
+        log.info(f"Single-chain mode set, will predict PDBs as single chains")
+
     # Directory for input single chains (extracted from input PDBs) and output CSV/PDB results
     input_chains_dir = f"{args.out_dir}/input_chains"
     out_dir = f"{args.out_dir}/output"
@@ -921,8 +927,8 @@ def main(args):
         out_dir=out_dir,
         gam_len_to_mean=gam_len_to_mean,
         gam_surface_to_std=gam_surface_to_std,
-        z_score_epi_threshold=args.z_score_epi_threshold,
-        no_z_normalization=args.no_z_normalization,
+        calibrated_score_epi_threshold=args.calibrated_score_epi_threshold,
+        no_calibrated_normalization=args.no_calibrated_normalization,
         verbose=args.verbose,
     )
 
