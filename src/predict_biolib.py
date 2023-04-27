@@ -744,9 +744,9 @@ def main(args):
     models = load_models(args.models_dir, num_models=100)
 
     # Load GAMs to normalize scores by length and surface area
-    gam_len_to_mean = load_gam_model(f"{args.models_dir}/gam_len_to_mean.pkl")
+    gam_len_to_mean = load_gam_model("/discotope3_web/models/gam_len_to_mean.pkl")
     gam_surface_to_std = load_gam_model(
-        f"{args.models_dir}/gam_surface_to_std.pkl"
+        "/discotope3_web/models/gam_surface_to_std.pkl"
     )
 
     # Predict and save
