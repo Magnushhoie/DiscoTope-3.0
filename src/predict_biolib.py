@@ -42,8 +42,17 @@ from predict_webserver import (get_basename_no_ext,
                                get_directory_basename_dict,
                                predict_using_models, read_list_file,
                                set_struc_res_bfactor, true_if_zip,
-                               load_gam_model, normalize_scores)
+                               normalize_scores)
 
+def load_gam_model(model_path):
+    """Loads GAM model from model_path"""
+
+    log.debug(f"Loading GAM model from {model_path}")
+
+    with open(model_path, "rb") as f:
+        gam_model = pickle.load(f)
+
+    return gam_model
 
 def save_clean_pdb_single_chains(
     pdb_path, pdb_name, bscore, outdir, save_full_complex=False
