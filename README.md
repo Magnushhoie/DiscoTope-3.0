@@ -87,6 +87,19 @@ pip install -r requirements_full.txt
 unzip models.zip
 ```
 
+## Nb: gcc or g++ errors, missing torch-scatter build ...
+```bash
+# Make sure gcc and g++ versions are updated, pybind11 is available
+# torch-scatter should be listed with 'conda list' or 'pip list'
+
+# With conda:
+conda install -c conda-forge pybind11 gcc cxx-compiler
+
+# With apt-get
+sudo apt-get install gcc g++
+pip install pybind11
+```
+
 For GPU accelerated predictions, please install [py-xgboost-gpu](https://xgboost.readthedocs.io/en/stable/install.html) and make sure a GPU is available.
 
 ```bash
