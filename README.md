@@ -14,7 +14,7 @@
 
 DiscoTope-3.0 is a structure-based B-cell epitope prediction tool, exploiting inverse folding latent representations from the [ESM-IF1](https://github.com/facebookresearch/esm) model. The tool accepts input protein structures in the [PDB](https://en.wikipedia.org/wiki/Protein_Data_Bank_(file_format)) format (solved or predicted), and outputs per-residue epitope propensity scores in both a PDB and CSV format.
 
-DiscoTope-3.0 accepts both experimental and AlphaFold2 modeled structures, with similar performance for both. It has been trained and validated only on single chain structures, meaning epitopes may be predicted in interface regions.
+DiscoTope-3.0 accepts both experimental and AlphaFold2 modeled structures, with similar performance for both. It has been trained and validated only on single chain structures.
 
 - Paper: [10.1101/2023.02.05.527174](https://www.biorxiv.org/content/10.1101/2023.02.05.527174v1)
 - Datasets: https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0
@@ -113,7 +113,9 @@ On a common workstation with a GPU, predictions takes <1 second per PDB chain wi
 ## Predict a single PDB (solved structure)
 
 ```bash
+# Run on single PDB on CPU only (by default checks for available GPU)
 python src/predict_webserver.py \
+--cpu_mode \
 --pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb \
 --struc_type solved \
 --out_dir output/7c4s
@@ -125,14 +127,14 @@ python src/predict_webserver.py \
 # Unzip AlphaFold2 test set
 unzip data/test_set_af2.zip -d data/
 
-# Run predictions on folder
+# Run predictions on PDB folder
 python src/predict_webserver.py \
 --pdb_dir data/test_set_af2 \
 --struc_type alphafold \
 --out_dir output/test_set_af2
 ```
 
-## Running on own data
+## Running on own data (batch-mode)
 
 Set the --struc_type parameter to 'solved' for experimentally solved structures or 'alphafold' for modelled structures.
 
@@ -208,6 +210,9 @@ ATOM      4  O   GLY A  14     -13.284 -32.465  23.555  1.00 15.19           O
 - PDBConstructionWarning regarding discontinuous chains: Indicates missing residue atoms in the input PDB file. May impact DiscoTope-3.0 performance (solved structures only)
 - Biopython future deprecation warning: Benign Biopython library warning, does not impact predictions
 - ESM regression weights missing warning: Benign fair-esm library warning, does not impact predictions
+
+# Note on reproducibility
+The same system environment and hardware will always produce the same output. However, if using an older CUDA version or GPU, minor discrepancies in DiscoTope-3.0 scores may occur from the 4th significant figure (e.g. e.g. 0.27130 -> 0.27125). These differences are caused due to inherent variability in floating point computations, especially from changes in CUDA toolkit optimizations.
 
 # Citation
 For usage of the package and associated manuscript, please cite according to the enclosed [citation.bib](./citation.bib).
