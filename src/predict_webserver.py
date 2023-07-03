@@ -1,8 +1,8 @@
 # Discotope 3.0 - Predict B-cell epitope propensity from structure
 # https://github.com/Magnushhoie/discotope3_web
 
-MAX_FILES = 50
-MAX_FILE_SIZE_MB = 30
+MAX_FILES = 100
+MAX_FILE_SIZE_MB = 50
 
 import logging
 import os
