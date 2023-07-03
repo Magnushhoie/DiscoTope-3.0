@@ -212,7 +212,7 @@ ATOM      4  O   GLY A  14     -13.284 -32.465  23.555  1.00 15.19           O
 - ESM regression weights missing warning: Benign fair-esm library warning, does not impact predictions
 
 # Note on reproducibility
-The same system environment and hardware will always produce the same output. However, if using an older CUDA version or GPU, minor discrepancies in DiscoTope-3.0 scores may occur from the 4th significant figure (e.g. e.g. 0.27130 -> 0.27125). These differences are caused due to inherent variability in floating point computations, especially from changes in CUDA toolkit optimizations.
+Output is deterministic, i.e. the same machine will always produce the same output. However, if comparing results run on an older CUDA version or GPU, minor discrepancies in DiscoTope-3.0 scores may occur from the 4th significant figure e.g. 0.27130 -> 0.27125. These differences are due to inherent variability in floating point computations, arising especially from changes in algorithms / optimizatons across CUDA toolkit versions. 
 
 # Citation
 For usage of the package and associated manuscript, please cite according to the enclosed [citation.bib](./citation.bib).
