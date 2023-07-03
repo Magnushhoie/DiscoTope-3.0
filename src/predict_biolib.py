@@ -39,10 +39,10 @@ from Bio.PDB.PDBParser import PDBParser
 
 from make_dataset import Discotope_Dataset_web
 from predict_webserver import (get_basename_no_ext,
-                               get_directory_basename_dict,
+                               get_directory_basename_dict, normalize_scores,
                                predict_using_models, read_list_file,
-                               set_struc_res_bfactor, true_if_zip,
-                               normalize_scores)
+                               set_struc_res_bfactor, true_if_zip)
+
 
 def load_gam_model(model_path):
     """Loads GAM model from model_path"""

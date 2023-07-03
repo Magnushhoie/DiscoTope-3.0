@@ -239,16 +239,17 @@ def check_valid_input(args):
 
         if true_if_zip(args.pdb_or_zip_file):
             with closing(ZipFile(args.pdb_or_zip_file)) as archive:
-                file_count = len(archive.infolist())
                 file_names = archive.namelist()
+                # Only count top-directory to avoid __MACOSX etc files
+                top_file_count = len([f for f in file_names if '/' not in f])
 
             # Check number of files in zip
-            if file_count > MAX_FILES_INT:
+            if top_file_count > MAX_FILES_INT:
                 log.error(
-                    f"Error: Max number of files {file_count}, found {file_count}"
+                    f"Error: Max number of files {MAX_FILES_INT}, found {top_file_count}"
                 )
                 sys.exit(1)
-
+                
             # Check filenames end in .pdb
             name = file_names[0]
             if os.path.splitext(name)[-1] != ".pdb":
@@ -982,7 +983,7 @@ if __name__ == "__main__":
 
             # Error messages if invalid input
             check_valid_input(args)
-            
+
             main(args)
             log.debug("Done!")
 
