@@ -1,7 +1,7 @@
 # Discotope 3.0 - Predict B-cell epitope propensity from structure
 # https://github.com/Magnushhoie/discotope3_web
 
-MAX_FILES = 100
+MAX_FILES_INT = 100
 MAX_FILE_SIZE_MB = 50
 
 import logging
@@ -231,7 +231,7 @@ def check_valid_input(args):
     # Check ZIP max-size, number of files
     if args.pdb_or_zip_file:
         size_mb = os.stat(args.pdb_or_zip_file).st_size / (1024 * 1024)
-        if args.web_server_mode and size_mb > MAX_FILES:
+        if args.web_server_mode and size_mb > MAX_FILE_SIZE_MB:
             log.error(
                 f"Error: Max file-size {MAX_FILE_SIZE_MB} MB, found {round(size_mb)} MB"
             )
@@ -243,7 +243,7 @@ def check_valid_input(args):
                 file_names = archive.namelist()
 
             # Check number of files in zip
-            if file_count > MAX_FILES:
+            if file_count > MAX_FILES_INT:
                 log.error(
                     f"Error: Max number of files {file_count}, found {file_count}"
                 )
@@ -591,9 +591,9 @@ def fetch_pdbs_extract_single_chains(pdb_list, out_dir) -> None:
         log.error("Error: No IDs found in PDB list.")
         sys.exit(1)
 
-    elif args.web_server_mode and len(pdb_list) > MAX_FILES:
+    elif args.web_server_mode and len(pdb_list) > MAX_FILES_INT:
         log.error(
-            f"Error: A maximum of {MAX_FILES} PDB IDs can be processed at one time. ({len(pdb_list)} IDs found)."
+            f"Error: A maximum of {MAX_FILES_INT} PDB IDs can be processed at one time. ({len(pdb_list)} IDs found)."
         )
         sys.exit(1)
 
@@ -965,9 +965,6 @@ if __name__ == "__main__":
     )
     log = logging.getLogger(__name__)
 
-    # Error messages if invalid input
-    check_valid_input(args)
-
     # INFO prints total summary and errors (default)
     if args.web_server_mode or args.verbose == 1:
         logging.getLogger().setLevel(logging.INFO)
@@ -982,6 +979,10 @@ if __name__ == "__main__":
 
         try:
             log.debug("Predicting PDBs using Discotope-3.0")
+
+            # Error messages if invalid input
+            check_valid_input(args)
+            
             main(args)
             log.debug("Done!")
 
