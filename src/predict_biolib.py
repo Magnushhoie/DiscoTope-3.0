@@ -1,8 +1,8 @@
 # Discotope 3.0 - Predict B-cell epitope propensity from structure
 # https://github.com/Magnushhoie/discotope3_web
 
-MAX_FILES = 50
-MAX_FILE_SIZE_MB = 30
+MAX_FILES_INT = 100
+MAX_FILE_SIZE_MB = 50
 
 import logging
 import os
@@ -41,380 +41,14 @@ from make_dataset import Discotope_Dataset_web
 from predict_webserver import (get_basename_no_ext,
                                get_directory_basename_dict, normalize_scores,
                                predict_using_models, read_list_file,
-                               set_struc_res_bfactor, true_if_zip)
-
-
-def load_gam_model(model_path):
-    """Loads GAM model from model_path"""
-
-    log.debug(f"Loading GAM model from {model_path}")
-
-    with open(model_path, "rb") as f:
-        gam_model = pickle.load(f)
-
-    return gam_model
-
-def save_clean_pdb_single_chains(
-    pdb_path, pdb_name, bscore, outdir, save_full_complex=False
-):
-    """
-    Function to save cleaned PDB file(s) with specified B-factor score.
-
-    Parameters
-    ----------
-    pdb_path : str
-        The path to the PDB file.
-    pdb_name : str
-        The name of the PDB file.
-    bscore : 100 or None
-        The B-factor score to be assigned to the residues/atoms, no change with None. 100 for solved structure, none for AF2
-    outdir : str
-        The directory to save the output file(s).
-    save_full_complex : bool, optional
-        If True, the function will save the whole complex as single PDB file.
-        Else, individual chains are saved as separate PDB files. Default is False.
-    """
-
-    class Clean_Chain(Select):
-        def __init__(self, score, chain=None):
-            self.bscore = bscore
-            self.chain = chain
-            if bscore is None:
-                self.const_score = None
-            elif isinstance(score, (int, float)):
-                self.const_score = True
-            else:
-                self.const_score = False
-            self.init_resid = None
-            self.prev_resid = None
-            self.letter_correction = 0
-            self.letter = " "
-            self.prev_letter = " "
-
-        # Clean out non-heteroatoms
-        # https://stackoverflow.com/questions/25718201/remove-heteroatoms-from-pdb
-        def accept_residue(self, residue):
-            return 1 if residue.id[0] == " " else 0
-
-        def accept_chain(self, chain):
-            return self.chain is None or chain == self.chain
-
-        def accept_atom(self, atom):
-            if self.const_score is None:
-                pass
-            elif self.const_score:
-                atom.set_bfactor(self.bscore)
-            else:
-                self.letter = atom.get_full_id()[3][2]
-                if atom.get_full_id()[3][2] not in (self.prev_letter, " "):
-                    log.debug(
-                        f"A residue with lettered numbering was found ({atom.get_full_id()[3][1]}{atom.get_full_id()[3][2]}). This may mess up visualisation."
-                    )
-                    self.letter_correction += 1
-                self.prev_letter = self.letter
-
-                res_id = atom.get_full_id()[3][1] + self.letter_correction
-
-                if self.init_resid is None:
-                    self.init_resid = res_id
-
-                if self.prev_resid is not None and res_id - self.prev_resid > 1:
-                    self.init_resid += res_id - self.prev_resid - 1
-
-                self.prev_resid = res_id
-
-                atom.set_bfactor(self.bscore[res_id - self.init_resid])
-            return True
-
-    HEADER_INFO = ("HEADER", "TITLE", "COMPND", "SOURCE")
-
-    p = PDBParser(PERMISSIVE=True)
-    structure = p.get_structure(pdb_name, pdb_path)
-
-    header = list()
-    with open(pdb_path, "r") as f:
-        for line in f:
-            if line.startswith(HEADER_INFO):
-                header.append(line.strip())
-            else:
-                break
-
-    # Save whole complex, cleaned
-    if save_full_complex:
-        pdb_out = f"{outdir}/{pdb_name}.pdb"
-        io_w_no_h = PDBIO()
-        io_w_no_h.set_structure(structure)
-        with open(pdb_out, "w") as f:
-            print(*header, sep="\n", file=f)
-            io_w_no_h.save(f, Clean_Chain(bscore, chain=None))
-
-    # Save individual chains, cleaned (default)
-    else:
-        chains = structure.get_chains()
-
-        for chain in chains:
-            pdb_out = f"{outdir}/{pdb_name}_{chain.get_id()}.pdb"
-            io_w_no_h = PDBIO()
-            io_w_no_h.set_structure(structure)
-            with open(pdb_out, "w") as f:
-                print(*header, sep="\n", file=f)
-                io_w_no_h.save(f, Clean_Chain(bscore, chain=chain))
-
-
-def predict_and_save(
-    models,
-    dataset,
-    pdb_dir,
-    out_dir,
-    gam_len_to_mean=False,
-    gam_surface_to_std=False,
-    calibrated_score_epi_threshold=0.90,
-    no_calibrated_normalization=False,
-    verbose: int = 0,
-) -> None:
-    """Predicts and saves CSV/PDBs with DiscoTope-3.0 scores"""
-
-    log.debug(f"Predicting PDBs ...")
-
-    # Speed up predictions by predicting entire dataset, exclude missing PDBs
-    X_all = np.concatenate(
-        [
-            dataset[i]["X_arr"]
-            for i in range(len(dataset))
-            if dataset[i]["X_arr"] is not False
-        ]
-    )
-    y_all = predict_using_models(models, X_all)
-
-    # Put in predictions for each PDB dataframe
-    df_all = pd.concat(
-        [
-            dataset[i]["df_stats"]
-            for i in range(len(dataset))
-            if dataset[i]["X_arr"] is not False
-        ]
-    )
-    df_all.insert(4, "DiscoTope-3.0_score", y_all)
-    df_all.insert(5, "calibrated_score", np.nan)
-    df_all.insert(6, "epitope", np.nan)
-
-    # Round numerical columns to 5 digits for nicer CSV output
-    num_cols = ["DiscoTope-3.0_score", "rsa"]
-    df_all[num_cols] = df_all[num_cols].applymap(lambda x: "{:.5f}".format(x))
-
-    # Keep track of structures for later
-    strucs_all = [
-        dataset[i]["PDB_biotite"]
-        for i in range(len(dataset))
-        if dataset[i]["X_arr"] is not False
-    ]
-
-    # PDB lengths used to infer which PDBs the predictions belong to
-    X_lens = [
-        len(dataset[i]["X_arr"])
-        for i in range(len(dataset))
-        if dataset[i]["X_arr"] is not False
-    ]
-    pdbids_all = [
-        dataset[i]["pdb_id"]
-        for i in range(len(dataset))
-        if dataset[i]["X_arr"] is not False
-    ]
-
-    if len(X_all) != sum(X_lens):
-        log.error(
-            f"Software bug: PDB feature array length {len(X_all)} does not match summed PDB lengths {sum(X_lens)}"
-        )
-        sys.exit(1)
-
-    if len(X_all) != len(df_all):
-        log.error(
-            f"Software bug: PDB feature array length {len(df_all)} does not match merged PDBs dataframe length {len(df_all)}"
-        )
-        sys.exit(1)
-
-    # Fetch pre-computed predictions by PDB lengths, save to CSV/PDB
-    start = 0
-    for _pdb, L, struc in zip(pdbids_all, X_lens, strucs_all):
-        log.debug(
-            f"Saving predictions for {_pdb} CSV/PDB to {out_dir}/{_pdb}_discotope3.csv"
-        )
-
-        end = start + L
-        df = df_all.iloc[start:end]
-        start = end
-
-        # Normalize for length and surface area with Calibrated-scores
-        calibrated_scores = normalize_scores(df, gam_len_to_mean, gam_surface_to_std)
-
-        # Epitopes can now be set by fixed threshold, default median epitope Calibrated-score (0.90)
-        # Nb: All residue median 0.00, exposed 0.50, exposed epitope 0.90
-        df["epitope"] = calibrated_scores >= calibrated_score_epi_threshold
-
-        # Set Calibrated-scores to string for nicer CSV output
-        df["calibrated_score"] = pd.Series(calibrated_scores).apply(lambda x: "{:.5f}".format(x))
-
-        # Save CSV
-        outfile = f"{out_dir}/{_pdb}_discotope3.csv"
-        df.to_csv(outfile, index=False)
-
-        # Save PDB with or without Calibrated-normalized scores
-        if no_calibrated_normalization:
-            struc_pred = set_struc_res_bfactor(
-                struc, df["DiscoTope-3.0_score"].values.astype(float) * 100
-            )
-        else:
-            struc_pred = set_struc_res_bfactor(
-                struc, df["calibrated_score"].values.astype(float) * 100
-            )
-
-        outfile = f"{out_dir}/{_pdb}_discotope3.pdb"
-        strucio.save_structure(outfile, struc_pred)
-
-
-def load_models(
-    models_dir: str,
-    num_models: int = 100,
-    verbose: int = 1,
-) -> List["xgb.XGBClassifier"]:
-    """Loads saved XGBoostClassifier files containing model weights, returns list of XGBoost models"""
-    import xgboost as xgb
-
-    # Search for model files
-    model_files = list(Path(models_dir).glob(f"XGB_*_of_*.json"))
-
-    if len(model_files) == 0:
-        log.error(f"Error: no files found in {models_dir}.")
-        sys.exit(1)
-
-    # Initialize new XGBoostClassifier and load model weights
-    log.debug(
-        f"Loading {num_models} / {len(model_files)} XGBoost models from {models_dir}"
-    )
-
-    models = []
-    for fp in model_files[:num_models]:
-        m = xgb.XGBClassifier()
-        m.load_model(str(fp))
-        models.append(m)
-
-    return models
-
-
-def report_pdb_input_outputs(pdb_list, in_dir, out_dir) -> None:
-    """Reports missing CSV and PDB file in out_dir, per PDB file in in_dir"""
-
-    in_pdbs = glob.glob(f"{in_dir}/*.pdb")
-    out_pdbs = glob.glob(f"{out_dir}/*.pdb")
-
-    in_dict = {Path(pdb).stem: pdb for pdb in in_pdbs}
-    out_dict = {re.sub(r"_discotope3$", "", Path(pdb).stem): pdb for pdb in out_pdbs}
-
-    # Report number of input vs outputs
-    log.info(
-        f"Predicted {len(out_pdbs)} / {len(in_pdbs)} single PDB chain(s) from {len(pdb_list)} input PDBs, saved to {out_dir}"
-    )
-
-    missing_pdbs = in_dict.keys() - out_dict.keys()
-    if len(missing_pdbs) >= 1:
-        log.info(
-            f"Note: Excluded predicting {len(missing_pdbs)} PDB chain(s) (see log file):\n{', '.join(missing_pdbs)}"
-        )
-
-
-def zip_folder_timeout(in_dir, out_dir, timeout_seconds=120) -> str:
-    """Zips in_dir, writes to out_dir, returns zip file"""
-
-    timestamp = time.strftime("%Y%m%d%H%M")
-    file_name = f"discotope3_{timestamp}.zip"
-    zip_path = f"{out_dir}/{file_name}"
-    bashCommand = (
-        f"zip -j {zip_path} {in_dir}/log.txt {in_dir}/*.pdb {in_dir}/*.csv || exit"
-    )
-
-    try:
-        output = subprocess.run(
-            bashCommand, timeout=timeout_seconds, capture_output=True, shell=True
-        )
-        log.debug(output.stdout.decode())
-        return file_name
-
-    except subprocess.TimeoutExpired:
-        log.error("Error: zip compression timed out")
-        sys.exit(1)
-
-
-def fetch_pdbs_extract_single_chains(pdb_list, out_dir) -> None:
-    """Fetch and process PDB chains/UniProt entries from list input"""
-
-    if len(pdb_list) == 0:
-        log.error("Error: No IDs found in PDB list.")
-        sys.exit(1)
-
-    elif args.web_server_mode and len(pdb_list) > MAX_FILES:
-        log.error(
-            f"Error: A maximum of {MAX_FILES} PDB IDs can be processed at one time. ({len(pdb_list)} IDs found)."
-        )
-        sys.exit(1)
-
-    for i, prot_id in enumerate(pdb_list):
-        if os.path.exists(f"{out_dir}/{prot_id}.pdb"):
-            log.debug(
-                f"PDB {i+1} / {len(pdb_list)} ({prot_id}) already present: {out_dir}/{prot_id}.pdb"
-            )
-            continue
-
-        else:
-            log.debug(f"Fetching {i+1}/{len(pdb_list)}: {prot_id}")
-
-        if args.struc_type == "alphafold":
-            URL = f"https://alphafold.ebi.ac.uk/files/AF-{prot_id}-F1-model_v4.pdb"
-            bscore = None
-        elif args.struc_type == "solved":
-            URL = f"https://files.rcsb.org/download/{prot_id}.pdb"
-            bscore = 100
-        else:
-            log.error(f"Error: Structure ID is of unknown type {args.struc_type}")
-            sys.exit(1)
-
-        response = requests.get(URL)
-        if response.status_code == 200:
-            with open(f"{out_dir}/temp", "wb") as f:
-                f.write(response.content)
-
-        elif response.status_code == 404:
-            log.error(
-                f"Error: File with the ID {prot_id} could not be found (url: {URL})."
-            )
-            log.error("Maybe you selected the wrong ID type or misspelled the ID?")
-            log.error("Note that PDB files may not exist in RCSB for large structures")
-            sys.exit(1)
-
-        elif response.status_code in (408, 504):
-            log.error(
-                f"Error: Request timed out with error code {response.status_code} (url: {URL})."
-            )
-            log.error(
-                """Try to download the structure(s) locally from the given database and upload individually or as compressed zip with PDBs.
-                Bulk download script: https://www.rcsb.org/docs/programmatic-access/batch-downloads-with-shell-script
-                """
-            )
-            sys.exit(1)
-
-        else:
-            log.error(
-                f"Error: Received status code {response.status_code}, when trying to fetch file from {URL}"
-            )
-            sys.exit(1)
-
-        save_clean_pdb_single_chains(
-            pdb_path=f"{out_dir}/temp",
-            pdb_name=prot_id,
-            bscore=bscore,
-            outdir=out_dir,
-            save_full_complex=args.multichain_mode,
-        )
-
+                               set_struc_res_bfactor, true_if_zip,
+                               save_clean_pdb_single_chains,
+                               predict_and_save,
+                               load_models,
+                               load_gam_model,
+                               save_clean_pdb_single_chains,
+                               fetch_pdbs_extract_single_chains,
+                               )
 
 def cmdline_args():
     # Make parser object
@@ -572,7 +206,7 @@ def check_valid_input(args):
         sys.exit(0)
 
     size_mb = os.stat(args.list_or_pdb_or_zip_file).st_size / (1024 * 1024)
-    if size_mb > MAX_FILES:
+    if size_mb > MAX_FILES_INT:
         log.error(f"Max file-size {MAX_FILE_SIZE_MB} MB, found {round(size_mb)} MB")
         sys.exit(0)
 
@@ -586,7 +220,7 @@ def check_valid_input(args):
             file_names = archive.namelist()
 
         # Check number of files in zip
-        if file_count > MAX_FILES:
+        if file_count > MAX_FILES_INT:
             log.error(f"Max number of files {file_count}, found {file_count}")
             sys.exit(0)
 
@@ -596,6 +230,27 @@ def check_valid_input(args):
             log.error(f"Ensure all ZIP content file-names end in .pdb, found {name}")
             sys.exit(0)
         return  # IS NOT LIST FILE
+
+
+def report_pdb_input_outputs(pdb_list, in_dir, out_dir) -> None:
+    """Reports missing CSV and PDB file in out_dir, per PDB file in in_dir"""
+
+    in_pdbs = glob.glob(f"{in_dir}/*.pdb")
+    out_pdbs = glob.glob(f"{out_dir}/*.pdb")
+
+    in_dict = {Path(pdb).stem: pdb for pdb in in_pdbs}
+    out_dict = {re.sub(r"_discotope3$", "", Path(pdb).stem): pdb for pdb in out_pdbs}
+
+    # Report number of input vs outputs
+    log.info(
+        f"Predicted {len(out_pdbs)} / {len(in_pdbs)} single PDB chain(s) from {len(pdb_list)} input PDBs, saved to {out_dir}"
+    )
+
+    missing_pdbs = in_dict.keys() - out_dict.keys()
+    if len(missing_pdbs) >= 1:
+        log.info(
+            f"Note: Excluded predicting {len(missing_pdbs)} PDB chain(s) (see log file):\n{', '.join(missing_pdbs)}"
+        )
 
 
 def print_HTML_output_webpage(dataset, out_dir) -> None:
