@@ -7,11 +7,14 @@ MAX_FILE_SIZE_MB = 50
 import logging
 import os
 import sys
+
+from pathlib import Path
+ROOT_PATH = Path(os.path.dirname(__file__)).parent
+sys.path.insert(0, ROOT_PATH)
+
 # Ignore Biopython deprecation warnings
-import warnings
-
 from Bio import BiopythonDeprecationWarning
-
+import warnings
 warnings.filterwarnings("ignore", category=BiopythonDeprecationWarning)
 
 import copy
@@ -24,7 +27,7 @@ import tempfile
 import time
 from argparse import ArgumentParser, RawTextHelpFormatter
 from contextlib import closing
-from pathlib import Path
+
 from typing import List
 from zipfile import ZipFile
 
@@ -50,13 +53,13 @@ Options:
     4) File with PDB ids on each line (--list_file <file>)
 
 # Predict on example PDBs in data folder
-python src/predict_webserver.py \
+python discotope3/main.py \
 --pdb_dir data/example_pdbs_solved \
 --struc_type solved \
 --out_dir output/example_pdbs_solved
 
 # Fetch PDBs from list file from AlphaFoldDB
-python src/predict_webserver.py \
+python discotope3/main.py \
 --list_file data/pdb_list_af2.txt \
 --struc_type alphafold \
 --out_dir output/pdb_list_af2
@@ -75,13 +78,6 @@ python src/predict_webserver.py \
             return arg
 
     p.add_argument(
-        "--web_server_mode",
-        action="store_true",
-        default=False,
-        help="Flag for printing HTML output",
-    )
-
-    p.add_argument(
         "-f",
         "--pdb_or_zip_file",
         dest="pdb_or_zip_file",
@@ -97,7 +93,6 @@ python src/predict_webserver.py \
 
     p.add_argument(
         "--struc_type",
-        required=True,  # Only needed for file input, not list
         default="solved",
         help="Structure type from file (solved | alphafold)",
     )
@@ -110,8 +105,7 @@ python src/predict_webserver.py \
 
     p.add_argument(
         "--out_dir",
-        default="output/",
-        required=True,
+        default="output",
         help="Job output directory",
     )
 
@@ -167,6 +161,13 @@ python src/predict_webserver.py \
         "--save_embeddings",
         default=False,
         help="Save embeddings to pdb_dir",
+    )
+
+    p.add_argument(
+        "--web_server_mode",
+        action="store_true",
+        default=False,
+        help="Flag for printing HTML output",
     )
 
     p.add_argument("-v", "--verbose", type=int, default=1, help="Verbose logging")

@@ -3,8 +3,9 @@ import os
 import sys
 from pathlib import Path
 
-ROOT_PATH = str(Path(os.getcwd()))
-sys.path.insert(0, "ROOT_PATH")
+from pathlib import Path
+ROOT_PATH = Path(os.path.dirname(__file__)).parent
+sys.path.insert(0, ROOT_PATH)
 
 import logging
 
@@ -28,7 +29,7 @@ from biotite.structure import filter_amino_acids, filter_backbone, get_chains
 from biotite.structure.io import pdb, pdbx
 from joblib import Parallel, delayed
 
-import esm_util_custom
+import discotope3.esm_util_custom
 
 # Sander scale residue SASA values
 # from Bio.Data.PDBData import residue_sasa_scales
@@ -138,11 +139,11 @@ def load_IF1_tensors(
 ) -> List:
     """Generate or load ESM-IF1 embeddings for a list of PDB files"""
 
-    import esm
-    import esm.inverse_folding
+    import discotope3.esm
+    import discotope3.esm.inverse_folding
 
     # Load ESM inverse folding model
-    model, alphabet = esm.pretrained.esm_if1_gvp4_t16_142M_UR50()
+    model, alphabet = discotope3.esm.pretrained.esm_if1_gvp4_t16_142M_UR50()
     model = model.eval()
 
     # Lists containing final output for each PDB
@@ -174,7 +175,7 @@ def load_IF1_tensors(
 
         # Try to extract C, Ca, N atoms and sequence, or skip
         try:
-            coords, seq = esm_util_custom.extract_coords_from_structure(structure)
+            coords, seq = discotope3.esm_util_custom.extract_coords_from_structure(structure)
 
         except Exception as E:
             log.error(
@@ -210,7 +211,7 @@ def load_IF1_tensors(
                 )
 
                 rep = (
-                    esm_util_custom.get_encoder_output(
+                    discotope3.esm_util_custom.get_encoder_output(
                         model, alphabet, coords, seq, device=device
                     )
                     .detach()
@@ -354,11 +355,11 @@ def embed_pdbs_IF1(
         (None): Saves torch tensor .pt files with per-residue embeddings
     """
 
-    import esm
-    import esm.inverse_folding
+    import discotope3.esm
+    import discotope3.esm.inverse_folding
 
     # Load ESM inverse folding model
-    model, alphabet = esm.pretrained.esm_if1_gvp4_t16_142M_UR50()
+    model, alphabet = discotope3.esm.pretrained.esm_if1_gvp4_t16_142M_UR50()
     model = model.eval()
 
     pdb_paths = glob.glob(f"{pdb_dir}/*.pdb")
@@ -383,7 +384,7 @@ def embed_pdbs_IF1(
                 structure, _ = load_structure_discotope(pdb_path, chain_id)
             except Exception as E:
                 log.error(f"Unable to load structure, retrying with IF1 logic\n:{E}")
-                structure = esm.inverse_folding.util.load_structure(
+                structure = discotope3.esm.inverse_folding.util.load_structure(
                     str(pdb_path), chain_id
                 )
 

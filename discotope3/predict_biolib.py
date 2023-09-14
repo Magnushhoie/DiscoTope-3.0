@@ -38,7 +38,7 @@ from Bio.PDB import PDBIO, Select
 from Bio.PDB.PDBParser import PDBParser
 
 from make_dataset import Discotope_Dataset_web
-from predict_webserver import (get_basename_no_ext,
+from main import (get_basename_no_ext,
                                get_directory_basename_dict, normalize_scores,
                                predict_using_models, read_list_file,
                                set_struc_res_bfactor, true_if_zip,

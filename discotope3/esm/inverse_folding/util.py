@@ -1,19 +1,25 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) Meta Platforms, Inc. and affiliates.
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import json
+import math
 from typing import List, Sequence, Tuple
 
 import biotite.structure
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.data as data
 from biotite.sequence import ProteinSequence
 from biotite.structure import filter_backbone, get_chains
 from biotite.structure.io import pdb, pdbx
 from biotite.structure.residues import get_residues
 from esm.data import BatchConverter
+from scipy.spatial import transform
+from scipy.stats import special_ortho_group
 
 
 def load_structure(fpath, chain=None):
@@ -99,17 +105,20 @@ def get_atom_coords_residuewise(atoms: List[str], struct: biotite.structure.Atom
 
 
 def get_sequence_loss(model, alphabet, coords, seq):
+    device = next(model.parameters()).device
     batch_converter = CoordBatchConverter(alphabet)
     batch = [(coords, None, seq)]
-    coords, confidence, strs, tokens, padding_mask = batch_converter(batch)
+    coords, confidence, strs, tokens, padding_mask = batch_converter(
+        batch, device=device
+    )
 
-    prev_output_tokens = tokens[:, :-1]
+    prev_output_tokens = tokens[:, :-1].to(device)
     target = tokens[:, 1:]
     target_padding_mask = target == alphabet.padding_idx
     logits, _ = model.forward(coords, padding_mask, confidence, prev_output_tokens)
     loss = F.cross_entropy(logits, target, reduction="none")
-    loss = loss[0].detach().numpy()
-    target_padding_mask = target_padding_mask[0].numpy()
+    loss = loss[0].cpu().detach().numpy()
+    target_padding_mask = target_padding_mask[0].cpu().numpy()
     return loss, target_padding_mask
 
 
@@ -122,57 +131,28 @@ def score_sequence(model, alphabet, coords, seq):
     return ll_fullseq, ll_withcoord
 
 
-def get_encoder_output(model, alphabet, coords, seq, device="cpu"):
-    # Batch-converter already checks for CUDA #MH
-    # the batch_converter is essential for forming the correct input format
+def get_encoder_output(model, alphabet, coords):
+    device = next(model.parameters()).device
     batch_converter = CoordBatchConverter(alphabet)
-    batch = [(coords, None, seq)]
-    coords, confidence, _, _, padding_mask = batch_converter(batch, device=device)
-
-    # Manually send model to cuda device if possible #MH
-    model.to(device)
-
+    batch = [(coords, None, None)]
+    coords, confidence, strs, tokens, padding_mask = batch_converter(
+        batch, device=device
+    )
     encoder_out = model.encoder.forward(
         coords, padding_mask, confidence, return_all_hiddens=False
     )
     # remove beginning and end (bos and eos tokens)
-    encoder_out = encoder_out["encoder_out"][0][1:-1, 0]
-
-    return encoder_out.detach().cpu()
-
-
-# MH
-def get_decoder_output(model, alphabet, coords, seq, features_only=True):
-    # CUDA #MH
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    batch_converter = CoordBatchConverter(alphabet)
-
-    batch = [(coords, None, seq)]
-    coords, confidence, strs, tokens, padding_mask = batch_converter(batch)
-    prev_output_tokens = tokens[:, :-1]
-
-    # Forward #MH
-    decoder_out, extra = model.forward(
-        coords,
-        padding_mask,
-        confidence,
-        prev_output_tokens,
-        features_only=features_only,
-    )
-
-    # Transpose
-    decoder_out = decoder_out[0].T
-
-    return decoder_out.detach().cpu()
+    return encoder_out["encoder_out"][0][1:-1, 0]
 
 
 def rotate(v, R):
     """
     Rotates a vector by a rotation matrix.
+
     Args:
         v: 3D vector, tensor of shape (length x batch_size x channels x 3)
         R: rotation matrix, tensor of shape (length x batch_size x 3 x 3)
+
     Returns:
         Rotated version of v by rotation matrix R.
     """
@@ -184,9 +164,11 @@ def rotate(v, R):
 def get_rotation_frames(coords):
     """
     Returns a local rotation frame defined by N, CA, C positions.
+
     Args:
         coords: coordinates, tensor of shape (batch_size x length x 3 x 3)
         where the third dimension is in order of N, CA, C
+
     Returns:
         Local relative rotation frames in shape (batch_size x length x 3 x 3)
     """
@@ -215,7 +197,7 @@ def rbf(values, v_min, v_max, n_bins=16):
     rbf_centers = torch.linspace(v_min, v_max, n_bins, device=values.device)
     rbf_centers = rbf_centers.view([1] * len(values.shape) + [-1])
     rbf_std = (v_max - v_min) / n_bins
-    # v_expand = torch.unsqueeze(values, -1)
+    v_expand = torch.unsqueeze(values, -1)
     z = (values.unsqueeze(-1) - rbf_centers) / rbf_std
     return torch.exp(-(z**2))
 
@@ -235,11 +217,7 @@ def normalize(tensor, dim=-1):
 
 
 class CoordBatchConverter(BatchConverter):
-    def __call__(
-        self,
-        raw_batch: Sequence[Tuple[Sequence, str]],
-        device=None,
-    ):
+    def __call__(self, raw_batch: Sequence[Tuple[Sequence, str]], device=None):
         """
         Args:
             raw_batch: List of tuples (coords, confidence, seq)
@@ -255,7 +233,6 @@ class CoordBatchConverter(BatchConverter):
             padding_mask: ByteTensor of shape batch_size x L
         """
         self.alphabet.cls_idx = self.alphabet.get_idx("<cath>")
-
         batch = []
         for coords, confidence, seq in raw_batch:
             if confidence is None:
@@ -279,16 +256,13 @@ class CoordBatchConverter(BatchConverter):
         ]
         coords = self.collate_dense_tensors(coords, pad_v=np.nan)
         confidence = self.collate_dense_tensors(confidence, pad_v=-1.0)
-
         if device is not None:
             coords = coords.to(device)
             confidence = confidence.to(device)
             tokens = tokens.to(device)
-
         padding_mask = torch.isnan(coords[:, :, 0, 0])
         coord_mask = torch.isfinite(coords.sum(-2).sum(-1))
-        confidence = (confidence * coord_mask + (-1.0) * padding_mask).float()
-
+        confidence = confidence * coord_mask + (-1.0) * padding_mask
         return coords, confidence, strs, tokens, padding_mask
 
     def from_lists(self, coords_list, confidence_list=None, seq_list=None, device=None):
