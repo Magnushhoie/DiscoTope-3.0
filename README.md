@@ -32,8 +32,8 @@ DiscoTope-3.0 accepts both experimental and AlphaFold2 modeled structures, with 
 
 ```bash
 # Setup environment and install
-conda create --name inverse3 python=3.9 -y
-conda activate inverse3
+conda create --name inverse python=3.9 -y
+conda activate inverse
 conda install -c pyg pyg -y
 conda install -c conda-forge pip -y
 
