@@ -60,28 +60,19 @@ Predictions are faster using a GPU and the recommended versions of pytorch, pyto
 # Setup environment with conda
 conda create -n inverse python=3.9
 conda activate inverse
-conda install pytorch=1.11 cudatoolkit=11.3 -c pytorch   ## very important to specify pytorch package!
-conda install pyg -c pyg -c conda-forge ## very important to make sure pytorch and cuda versions not being changed
+conda install pytorch=1.11 cudatoolkit=11.3 -c pytorch
+conda install pyg -c pyg -c conda-forge
 conda install pip
 
 # install pip dependencies
-pip install -r requirements.txt
+pip install .
 ```
 
 ## Linux with pip (~5 mins)
 ```bash
 # install pip dependencies
 pip install -r requirements_recommended.txt
-```
-
-## For MacOS
-```bash
-# Setup environment with conda
-conda create -n inverse python=3.9
-conda install pyg -c pyg -c conda-forge
-
-# install pip dependencies
-pip install -r requirements.txt
+pip install .
 ```
 
 ## Running DiscoTope-3.0
