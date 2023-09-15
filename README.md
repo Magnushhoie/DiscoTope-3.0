@@ -91,6 +91,8 @@ unzip models.zip
 
 # Now select one of multiple options:
 
+# Now select one of multiple options:
+
 # 1. Predict single PDB (solved)
 python discotope3/main.py --pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb
 
@@ -98,14 +100,16 @@ python discotope3/main.py --pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb
 python discotope3/main.py --pdb_or_zip_file data/example_pdbs_alphafold/7tdm_B.pdb --struc_type alphafold
 
 # 3. Predict a folder of PDBs
-python discotope3/main.py --pdb_dir data/example_pdbs_solved
+python discotope3/main.py --pdb_dir data/example_pdbs_solved --out_dir output/example_pdbs_solved
 
 # 4. Predict a ZIP file of PDBs
-python discotope3/main.py --pdb_or_zip_file pdbs_in_zipfile.zip
+python discotope3/main.py --pdb_or_zip_file pdbs_in_zipfile.zip --out_dir output/pdbs_in_zipfile
 
-# 5. Fetch PDB IDs from file and predict
-# Nb: Fetches from RCSB if struc_type is solved and AlphaFolddb if alphafold
-python discotope3/main.py --list_file pdb_list_solved.txt --struc_type solved
+# 5. Fetch PDBs from RCSB
+python discotope3/main.py --list_file pdb_list_solved.txt --struc_type solved --out_dir output/pdb_list_solved
+
+# 6. Fetch PDBs from Alphafolddb
+python discotope3/main.py --list_file pdb_list_af2.txt --struc_type alphafold --out_dir output/pdb_list_af2
 ```
 
 # DiscoTope-3.0 output

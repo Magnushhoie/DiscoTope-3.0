@@ -14,41 +14,20 @@ from Bio import BiopythonDeprecationWarning
 
 warnings.filterwarnings("ignore", category=BiopythonDeprecationWarning)
 
-import copy
 import glob
 import os
-import pickle
 import re
-import subprocess
 import tempfile
-import time
 from argparse import ArgumentParser, RawTextHelpFormatter
 from contextlib import closing
 from pathlib import Path
-from typing import List
 from zipfile import ZipFile
 
-import biotite
-import biotite.structure.io as strucio
-import numpy as np
-import pandas as pd
-import requests
-import xgboost as xgb
-from Bio.PDB import PDBIO, Select
-from Bio.PDB.PDBParser import PDBParser
-
+from main import (fetch_pdbs_extract_single_chains, get_basename_no_ext,
+                  load_gam_model, load_models, predict_and_save,
+                  read_list_file, save_clean_pdb_single_chains, true_if_zip)
 from make_dataset import Discotope_Dataset_web
-from main import (get_basename_no_ext,
-                               get_directory_basename_dict, normalize_scores,
-                               predict_using_models, read_list_file,
-                               set_struc_res_bfactor, true_if_zip,
-                               save_clean_pdb_single_chains,
-                               predict_and_save,
-                               load_models,
-                               load_gam_model,
-                               save_clean_pdb_single_chains,
-                               fetch_pdbs_extract_single_chains,
-                               )
+
 
 def cmdline_args():
     # Make parser object
@@ -400,9 +379,7 @@ def main(args):
 
     # Load GAMs to normalize scores by length and surface area
     gam_len_to_mean = load_gam_model("/discotope3_web/models/gam_len_to_mean.pkl")
-    gam_surface_to_std = load_gam_model(
-        "/discotope3_web/models/gam_surface_to_std.pkl"
-    )
+    gam_surface_to_std = load_gam_model("/discotope3_web/models/gam_surface_to_std.pkl")
 
     # Predict and save
     predict_and_save(

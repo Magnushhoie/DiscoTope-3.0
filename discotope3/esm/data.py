@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import List, Sequence, Tuple, Union
 
 import torch
+
 from discotope3.esm.constants import proteinseq_toks
 
 RawMSA = Sequence[Tuple[str, str]]

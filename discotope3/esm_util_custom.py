@@ -13,6 +13,7 @@ from biotite.sequence import ProteinSequence
 from biotite.structure import filter_backbone, get_chains
 from biotite.structure.io import pdb, pdbx
 from biotite.structure.residues import get_residues
+
 from discotope3.esm.data import BatchConverter
 
 

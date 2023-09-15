@@ -3,7 +3,6 @@ import os
 import sys
 from pathlib import Path
 
-from pathlib import Path
 ROOT_PATH = Path(os.path.dirname(__file__)).parent
 sys.path.insert(0, ROOT_PATH)
 
@@ -175,7 +174,9 @@ def load_IF1_tensors(
 
         # Try to extract C, Ca, N atoms and sequence, or skip
         try:
-            coords, seq = discotope3.esm_util_custom.extract_coords_from_structure(structure)
+            coords, seq = discotope3.esm_util_custom.extract_coords_from_structure(
+                structure
+            )
 
         except Exception as E:
             log.error(
@@ -388,7 +389,9 @@ def embed_pdbs_IF1(
                     str(pdb_path), chain_id
                 )
 
-            coords, seq = esm_util_custom.extract_coords_from_structure(structure)
+            coords, seq = discotope3.esm_util_custom.extract_coords_from_structure(
+                structure
+            )
 
             if verbose:
                 log.debug(f"PDB {pdb}, IF1: {len(seq)} residues")

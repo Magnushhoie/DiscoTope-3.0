@@ -7,14 +7,17 @@ MAX_FILE_SIZE_MB = 50
 import logging
 import os
 import sys
-
 from pathlib import Path
+import shutil
+
 ROOT_PATH = Path(os.path.dirname(__file__)).parent
 sys.path.insert(0, ROOT_PATH)
 
+import warnings
+
 # Ignore Biopython deprecation warnings
 from Bio import BiopythonDeprecationWarning
-import warnings
+
 warnings.filterwarnings("ignore", category=BiopythonDeprecationWarning)
 
 import copy
@@ -27,7 +30,6 @@ import tempfile
 import time
 from argparse import ArgumentParser, RawTextHelpFormatter
 from contextlib import closing
-
 from typing import List
 from zipfile import ZipFile
 
@@ -39,34 +41,35 @@ import requests
 import xgboost as xgb
 from Bio.PDB import PDBIO, Select
 from Bio.PDB.PDBParser import PDBParser
-
 from make_dataset import Discotope_Dataset_web
 
 
 def cmdline_args():
     # Make parser object
     usage = rf"""
-Options:
-    1) Single PDB file (--pdb_or_zip_file <file>)
-    2) Zip file containing PDBs (--pdb_or_zip_file <file>)
-    3) Directory with PDB files (--pdb_dir <folder>)
-    4) File with PDB ids on each line (--list_file <file>)
+Example usage (default writes to output/):
 
-# Predict on example PDBs in data folder
-python discotope3/main.py \
---pdb_dir data/example_pdbs_solved \
---struc_type solved \
---out_dir output/example_pdbs_solved
+# 1. Predict single PDB (solved)
+python discotope3/main.py --pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb
 
-# Fetch PDBs from list file from AlphaFoldDB
-python discotope3/main.py \
---list_file data/pdb_list_af2.txt \
---struc_type alphafold \
---out_dir output/pdb_list_af2
+# 2. Predict AlphaFold structure
+python discotope3/main.py --pdb_or_zip_file data/example_pdbs_alphafold/7tdm_B.pdb --struc_type alphafold
+
+# 3. Predict a folder of PDBs
+python discotope3/main.py --pdb_dir data/example_pdbs_solved
+
+# 4. Predict a ZIP file of PDBs
+python discotope3/main.py --pdb_or_zip_file data/pdbs_in_zipfile.zip
+
+# 5. Fetch PDBs from RCSB
+python discotope3/main.py --list_file data/pdb_list_solved.txt --struc_type solved
+
+# 6. Fetch PDBs from Alphafolddb
+python discotope3/main.py --list_file data/pdb_list_af2.txt --struc_type alphafold
  
 """
     p = ArgumentParser(
-        description="Predict Discotope-3.0 score on folder of input AF2 PDBs",
+        description="Predict B-cell epitope propensity on input protein PDB structures",
         formatter_class=RawTextHelpFormatter,
         usage=usage,
     )
@@ -242,7 +245,7 @@ def check_valid_input(args):
             with closing(ZipFile(args.pdb_or_zip_file)) as archive:
                 file_names = archive.namelist()
                 # Only count top-directory to avoid __MACOSX etc files
-                top_file_count = len([f for f in file_names if '/' not in f])
+                top_file_count = len([f for f in file_names if "/" not in f])
 
             # Check number of files in zip
             if top_file_count > MAX_FILES_INT:
@@ -250,7 +253,7 @@ def check_valid_input(args):
                     f"Error: Max number of files {MAX_FILES_INT}, found {top_file_count}"
                 )
                 sys.exit(1)
-                
+
             # Check filenames end in .pdb
             name = file_names[0]
             if os.path.splitext(name)[-1] != ".pdb":
@@ -443,8 +446,8 @@ def predict_and_save(
     # Fetch pre-computed predictions by PDB lengths, save to CSV/PDB
     start = 0
     for _pdb, L, struc in zip(pdbids_all, X_lens, strucs_all):
-        log.debug(
-            f"Saving predictions for {_pdb} CSV/PDB to {out_dir}/{_pdb}_discotope3.csv"
+        log.info(
+            f"Saving predictions for {_pdb}.pdb to {out_dir}/{_pdb}_discotope3.csv"
         )
 
         end = start + L
@@ -459,7 +462,9 @@ def predict_and_save(
         df["epitope"] = calibrated_scores >= calibrated_score_epi_threshold
 
         # Set Calibrated-scores to string for nicer CSV output
-        df["calibrated_score"] = pd.Series(calibrated_scores).apply(lambda x: "{:.5f}".format(x))
+        df["calibrated_score"] = pd.Series(calibrated_scores).apply(
+            lambda x: "{:.5f}".format(x)
+        )
 
         # Save CSV
         outfile = f"{out_dir}/{_pdb}_discotope3.csv"
@@ -687,7 +692,7 @@ def report_pdb_input_outputs(pdb_list, in_dir, out_dir) -> None:
 
     # Report number of input vs outputs
     log.info(
-        f"Predicted {len(out_pdbs)} / {len(in_pdbs)} PDB files extracted from {len(pdb_list)} input PDBs, saved to {args.out_dir}/output"
+        f"Predicted {len(out_pdbs)} / {len(in_pdbs)} PDB files extracted from {len(pdb_list)} input PDBs, saved to {out_dir}"
     )
 
     missing_pdbs = in_dict.keys() - out_dict.keys()
@@ -760,9 +765,7 @@ def print_HTML_output_webpage(dataset, out_dir, out_zip) -> None:
             examples += f"id:'{sample['pdb_id']}',url:'https://services.healthtech.dtu.dk/{out_pdb}',info:'Structure {i+1}'"
             examples += "},"
             structures += "`"
-            with open(
-                f"{args.out_dir}/output/{sample['pdb_id']}_discotope3.pdb", "r"
-            ) as f:
+            with open(f"{args.out_dir}/{sample['pdb_id']}_discotope3.pdb", "r") as f:
                 structures += f.read()
             structures += "`,"
 
@@ -804,158 +807,163 @@ def load_gam_model(model_path):
 def main(args):
     """Main function"""
 
-    # Log if multichain mode is set
-    if args.multichain_mode:
-        log.info(f"Multi-chain mode set, will predict PDBs as complexes")
-    else:
-        log.info(f"Single-chain mode set, will predict PDBs as single chains")
+    # Use temporary directory for chains dir
+    with tempfile.TemporaryDirectory() as temp_chains_dir:
 
-    # Directory for input single chains (extracted from input PDBs) and output CSV/PDB results
-    input_chains_dir = f"{args.out_dir}/input_chains"
-    out_dir = f"{args.out_dir}/output"
+        # Infer output + name folder (i.e. output/7csb) from args or input list_file / zip / PDB / directory
+        out_name = ""
+        if args.list_file:
+            out_name = get_basename_no_ext(args.list_file)
+        elif args.pdb_or_zip_file:
+            out_name = get_basename_no_ext(args.pdb_or_zip_file)
+        elif args.pdb_dir:
+            out_name = get_basename_no_ext(args.pdb_dir)
 
-    os.makedirs(input_chains_dir, exist_ok=True)
-    os.makedirs(out_dir, exist_ok=True)
+        out_dir = f"{args.out_dir}/{out_name}"
+        os.makedirs(out_dir, exist_ok=True)
 
-    # Set B-factor / pLDDT column to 100 for solved structures, leave as is for AF2 structures
-    if args.struc_type == "alphafold":
-        bscore = None
-    else:
-        bscore = 100
-
-    # Prepare input PDBs by extracting single chains to input_chains_dir
-    # Nb: After check_valid_inputs, only one of [pdb_or_zip_file, list_file, pdb_dir] is set
-
-    # 1. Download PDBs from RCSB or AlphaFoldDB
-    if args.list_file:
-        log.debug(f"Fetching PDBs")
-
-        pdb_list = read_list_file(args.list_file)
-        log.info(
-            f"Fetching {len(pdb_list)} PDBs from {'RCSB' if args.struc_type == 'solved' else 'AlphaFoldDB'}, extracting single chains to {input_chains_dir}"
-        )
-        fetch_pdbs_extract_single_chains(pdb_list, input_chains_dir)
-
-    # Check whether input file is a compressed ZIP file or single PDB
-    if args.pdb_or_zip_file:
-        # 2. If ZIP, unzip and extract single chains
-        if true_if_zip(args.pdb_or_zip_file):
-            log.debug(f"Unzipping PDBs")
-
-            # Temporary directory for zip output, delete after extract/saving single chains
-            with tempfile.TemporaryDirectory() as tempdir:
-                zf = ZipFile(args.pdb_or_zip_file)
-                zf.extractall(tempdir)
-
-                pdb_list = glob.glob(f"{tempdir}/*.pdb")
-                log.info(
-                    f"Extracted {len(pdb_list)} PDBs from ZIP, extracting single chains to {input_chains_dir}"
-                )
-                for f in pdb_list:
-                    pdb_name = get_basename_no_ext(f)
-                    save_clean_pdb_single_chains(
-                        f,
-                        pdb_name,
-                        bscore,
-                        input_chains_dir,
-                        save_full_complex=args.multichain_mode,
-                    )
-
-        # 3. If single PDB, copy to tempdir
+        # Set B-factor / pLDDT column to 100 for solved structures, leave as is for AF2 structures
+        if args.struc_type == "alphafold":
+            bscore = None
         else:
-            f = args.pdb_or_zip_file
-            pdb_name = get_basename_no_ext(f)
-            pdb_list = [pdb_name]
+            bscore = 100
+
+        # Prepare input PDBs by extracting single chains to temp_chains_dir
+        # Nb: After check_valid_inputs, only one of [pdb_or_zip_file, list_file, pdb_dir] is set
+
+        # 1. Download PDBs from RCSB or AlphaFoldDB
+        if args.list_file:
+            log.debug(f"Fetching PDBs")
+
+            pdb_list = read_list_file(args.list_file)
             log.info(
-                f"Single PDB file input ({pdb_name}), extracting single chains to {input_chains_dir}"
+                f"Fetching {len(pdb_list)} PDBs from {'RCSB' if args.struc_type == 'solved' else 'AlphaFoldDB'}, extracting single chains to {temp_chains_dir}"
             )
-            save_clean_pdb_single_chains(
-                f,
-                pdb_name,
-                bscore,
-                input_chains_dir,
-                save_full_complex=args.multichain_mode,
-            )
+            fetch_pdbs_extract_single_chains(pdb_list, temp_chains_dir)
 
-    # 4. Load from PDB folder
-    if args.pdb_dir:
-        pdb_list = glob.glob(f"{args.pdb_dir}/*.pdb")
+        # Check whether input file is a compressed ZIP file or single PDB
+        if args.pdb_or_zip_file:
+            # 2. If ZIP, unzip and extract single chains
+            if true_if_zip(args.pdb_or_zip_file):
+                log.debug(f"Unzipping PDBs")
+
+                # Temporary directory for zip output, delete after extract/saving single chains
+                with tempfile.TemporaryDirectory() as tempdir:
+                    zf = ZipFile(args.pdb_or_zip_file)
+                    zf.extractall(tempdir)
+
+                    pdb_list = glob.glob(f"{tempdir}/*.pdb")
+                    log.info(
+                        f"Extracted {len(pdb_list)} PDBs from ZIP, extracting single chains to {temp_chains_dir}"
+                    )
+                    for f in pdb_list:
+                        pdb_name = get_basename_no_ext(f)
+                        save_clean_pdb_single_chains(
+                            f,
+                            pdb_name,
+                            bscore,
+                            temp_chains_dir,
+                            save_full_complex=args.multichain_mode,
+                        )
+
+            # 3. If single PDB, copy to tempdir
+            else:
+                f = args.pdb_or_zip_file
+                pdb_name = get_basename_no_ext(f)
+                pdb_list = [pdb_name]
+                log.info(
+                    f"Single PDB file input ({pdb_name}), extracting single chains to {temp_chains_dir}"
+                )
+                save_clean_pdb_single_chains(
+                    f,
+                    pdb_name,
+                    bscore,
+                    temp_chains_dir,
+                    save_full_complex=args.multichain_mode,
+                )
+
+        # 4. Load from PDB folder
+        if args.pdb_dir:
+            pdb_list = glob.glob(f"{args.pdb_dir}/*.pdb")
+            log.info(
+                f"Found {len(pdb_list)} PDBs in {args.pdb_dir}, extracting single chains to {temp_chains_dir}"
+            )
+            for f in pdb_list:
+                pdb_name = get_basename_no_ext(f)
+                save_clean_pdb_single_chains(
+                    f,
+                    pdb_name,
+                    bscore,
+                    temp_chains_dir,
+                    save_full_complex=args.multichain_mode,
+                )
+
+        # Summary statistics
+        chain_list = glob.glob(f"{temp_chains_dir}/*.pdb")
         log.info(
-            f"Found {len(pdb_list)} PDBs in {args.pdb_dir}, extracting single chains to {input_chains_dir}"
+            f"Found {len(chain_list)} extracted single chains in {temp_chains_dir}"
         )
-        for f in pdb_list:
-            pdb_name = get_basename_no_ext(f)
-            save_clean_pdb_single_chains(
-                f,
-                pdb_name,
-                bscore,
-                input_chains_dir,
-                save_full_complex=args.multichain_mode,
-            )
 
-    # Summary statistics
-    chain_list = glob.glob(f"{input_chains_dir}/*.pdb")
-    log.info(f"Found {len(chain_list)} extracted single chains in {input_chains_dir}")
+        # Embed end process PDB features
+        log.info(f"Pre-processing PDBs using ESM-IF1")
+        dataset = Discotope_Dataset_web(
+            temp_chains_dir,
+            structure_type=args.struc_type,
+            check_existing_embeddings=args.check_existing_embeddings,
+            save_embeddings=args.save_embeddings,
+            cpu_only=args.cpu_only,
+            max_gpu_pdb_length=args.max_gpu_pdb_length,
+            verbose=args.verbose,
+        )
+        if len(dataset) == 0:
+            log.error("Error: No PDB files were valid. Please check input PDBs.")
+            sys.exit(1)
 
-    # Embed end process PDB features
-    log.debug(f"Pre-processing PDBs")
-    dataset = Discotope_Dataset_web(
-        input_chains_dir,
-        structure_type=args.struc_type,
-        check_existing_embeddings=args.check_existing_embeddings,
-        save_embeddings=args.save_embeddings,
-        cpu_only=args.cpu_only,
-        max_gpu_pdb_length=args.max_gpu_pdb_length,
-        verbose=args.verbose,
-    )
-    if len(dataset) == 0:
-        log.error("Error: No PDB files were valid. Please check input PDBs.")
-        sys.exit(1)
+        # Load pre-trained XGBoost models
+        models = load_models(args.models_dir, num_models=100)
 
-    # Load pre-trained XGBoost models
-    models = load_models(args.models_dir, num_models=100)
+        # Load GAMs to normalize scores by length and surface area
+        gam_len_to_mean = load_gam_model(f"{args.models_dir}/gam_len_to_mean.pkl")
+        gam_surface_to_std = load_gam_model(f"{args.models_dir}/gam_surface_to_std.pkl")
 
-    # Load GAMs to normalize scores by length and surface area
-    gam_len_to_mean = load_gam_model(f"{args.models_dir}/gam_len_to_mean.pkl")
-    gam_surface_to_std = load_gam_model(
-        f"{args.models_dir}/gam_surface_to_std.pkl"
-    )
+        # Predict and save
+        log.info(f"Predicting PDBs with DiscoTope-3.0")
+        predict_and_save(
+            models,
+            dataset,
+            temp_chains_dir,
+            out_dir=out_dir,
+            gam_len_to_mean=gam_len_to_mean,
+            gam_surface_to_std=gam_surface_to_std,
+            calibrated_score_epi_threshold=args.calibrated_score_epi_threshold,
+            no_calibrated_normalization=args.no_calibrated_normalization,
+            verbose=args.verbose,
+        )
 
-    # Predict and save
-    predict_and_save(
-        models,
-        dataset,
-        input_chains_dir,
-        out_dir=out_dir,
-        gam_len_to_mean=gam_len_to_mean,
-        gam_surface_to_std=gam_surface_to_std,
-        calibrated_score_epi_threshold=args.calibrated_score_epi_threshold,
-        no_calibrated_normalization=args.no_calibrated_normalization,
-        verbose=args.verbose,
-    )
+        # Print if any PDB input / output summary, and any missing PDBs
+        report_pdb_input_outputs(pdb_list, temp_chains_dir, out_dir)
 
-    # Print if any PDB input / output summary, and any missing PDBs
-    report_pdb_input_outputs(pdb_list, input_chains_dir, out_dir)
+        # If web server mode, prepare downloadable zip and results HTML page
+        if args.web_server_mode:
+            # Prepare downloadable zip, store in same output directory
+            log.debug(f"Compressing ZIP file")
+            out_zip = zip_folder_timeout(in_dir=out_dir, out_dir=out_dir)
 
-    # If web server mode, prepare downloadable zip and results HTML page
-    if args.web_server_mode:
-        # Prepare downloadable zip, store in same output directory
-        log.debug(f"Compressing ZIP file")
-        out_zip = zip_folder_timeout(in_dir=out_dir, out_dir=out_dir)
+            # Prints per single chain result download links and HTML output
+            # Skips over any PDBs that are missing results
+            log.debug(f"Printing HTML output")
+            print_HTML_output_webpage(dataset, out_dir, out_zip)
 
-        # Prints per single chain result download links and HTML output
-        # Skips over any PDBs that are missing results
-        log.debug(f"Printing HTML output")
-        print_HTML_output_webpage(dataset, out_dir, out_zip)
-
+        # Finally, migrate log file to output directory
+        shutil.copyfile(f"{args.out_dir}/log.txt", f"{out_dir}/log.txt")
 
 if __name__ == "__main__":
     args = cmdline_args()
-    os.makedirs(f"{args.out_dir}/output/", exist_ok=True)
 
     # Log to file and stdout
     # If verbose == 0, only errors are printed (default 1)
-    log_path = os.path.abspath(f"{args.out_dir}/output/log.txt")
+    os.makedirs(args.out_dir, exist_ok=True)
+    log_path = os.path.abspath(f"{args.out_dir}/log.txt")
     logging.basicConfig(
         level=logging.ERROR,
         format="[{asctime}] {message}",
@@ -980,10 +988,17 @@ if __name__ == "__main__":
         warnings.simplefilter("ignore")
 
         try:
-            log.debug("Predicting PDBs using Discotope-3.0")
+            # Run DiscoTope-3.0
+            log.debug("Predicting B-cell epitope propensity on input PDBs using Discotope-3.0")
 
             # Error messages if invalid input
             check_valid_input(args)
+
+            # Log if multichain mode is set
+            if args.multichain_mode:
+                log.info(f"Multi-chain mode set, will predict PDBs as complexes")
+            else:
+                log.info(f"Single-chain mode set, will predict PDBs as single chains")
 
             main(args)
             log.debug("Done!")

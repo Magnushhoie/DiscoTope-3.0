@@ -181,16 +181,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(args.pdbdir, args.outdir, args.verbose)
-
-
-"""
-pdb_dir = "../output/test_solved_full_complex/input_chains/"
-pdb_files = glob.glob(f"{pdb_dir}/*.pdb")
-
-for _pdb in pdb_files: 
-    ab_chains = find_antibody_chains(_pdb)
-
-for _pdb in pdb_files:
-    pdb_name = Path(_pdb).stem
-    save_clean_pdb_single_chains(_pdb, pdb_name, bscore=None, outdir="temp/")
-"""

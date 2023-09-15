@@ -9,8 +9,9 @@ import warnings
 from argparse import Namespace
 from pathlib import Path
 
-import discotope3.esm
 import torch
+
+import discotope3.esm
 
 
 def _has_regression_weights(model_name):
