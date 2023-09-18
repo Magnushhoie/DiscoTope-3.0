@@ -9,6 +9,9 @@ DiscoTope-3.0 accepts both experimental and AlphaFold2 modeled structures, with 
 - Web server DTU: https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0
 - Web server BioLib: https://biolib.com/DTU/DiscoTope-3/
 
+# Colab
+To test the method out without installing it you can try this [Google Colab](https://colab.research.google.com/drive/1sMmzzno5fAeGb-r0D7R6lqo9Tld9LYiq)
+
 # Repo contents
 
 - [data](./data): Example input files, including test set
