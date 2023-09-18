@@ -1,7 +1,7 @@
 torch_geometric
 biopython==1.80
 biotite==0.34
-xgboost==1.6.1
+xgboost==2.*
 pygam==0.9.0
 numpy==1.24.*
 pandas==1.4.*
