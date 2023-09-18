@@ -28,7 +28,7 @@ DiscoTope-3.0 accepts both experimental and AlphaFold2 modeled structures, with 
 - [numpy](https://github.com/numpy/numpy)
 - [py-xgboost-gpu](https://xgboost.readthedocs.io/en/stable/install.html)
 
-# Quickstart guide
+# Quickstart guide (CPU only)
 
 ```bash
 # Setup environment and install
@@ -44,8 +44,8 @@ pip install .
 # Unzip models to use
 unzip models.zip
 
-# 1. Predict single PDB (solved)
-python discotope3/main.py --pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb
+# 1. Predict single PDB (solved structure, run on CPU)
+python discotope3/main.py --cpu_only --pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb
 ```
 
 # Installation guide
@@ -54,7 +54,7 @@ We highly recommend using an Ubuntu OS and Conda ([miniconda](https://docs.conda
 
 Predictions are faster using a GPU and the recommended versions of pytorch, pytorch-geometric and cudatoolkit, but these exact versions are not required.
 
-## For Linux with conda (recommended, ~2 mins) 
+## For Linux & GPU with conda (recommended, ~2 mins) 
 
 ```bash
 # Setup environment with conda
@@ -68,7 +68,7 @@ conda install pip
 pip install .
 ```
 
-## Linux with pip (~5 mins)
+## Linux & GPU with pip (~5 mins)
 ```bash
 # install pip dependencies
 pip install -r requirements_recommended.txt
@@ -91,8 +91,6 @@ unzip models.zip
 
 # Now select one of multiple options:
 
-# Now select one of multiple options:
-
 # 1. Predict single PDB (solved)
 python discotope3/main.py --pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb
 
@@ -110,6 +108,37 @@ python discotope3/main.py --list_file pdb_list_solved.txt --struc_type solved --
 
 # 6. Fetch PDBs from Alphafolddb
 python discotope3/main.py --list_file pdb_list_af2.txt --struc_type alphafold --out_dir output/pdb_list_af2
+
+Predict B-cell epitope propensity on input protein PDB structures
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -f PDB_OR_ZIP_FILE, --pdb_or_zip_file PDB_OR_ZIP_FILE
+                        Input file, either single PDB or compressed zip file with multiple PDBs
+  --list_file LIST_FILE
+                        File with PDB or Uniprot IDs, fetched from RCSB/AlphaFolddb
+  --struc_type STRUC_TYPE
+                        Structure type from file (solved | alphafold)
+  --pdb_dir PDB_DIR     Directory with AF2 PDBs
+  --out_dir OUT_DIR     Job output directory
+  --models_dir MODELS_DIR
+                        Path for .json files containing trained XGBoost ensemble
+  --calibrated_score_epi_threshold CALIBRATED_SCORE_EPI_THRESHOLD
+                        Calibrated-score threshold for epitopes [low 0.40, moderate (0.90), higher 1.50]
+  --no_calibrated_normalization
+                        Skip Calibrated-normalization of PDBs
+  --check_existing_embeddings CHECK_EXISTING_EMBEDDINGS
+                        Check for existing embeddings to load in pdb_dir
+  --cpu_only            Use CPU even if GPU is available (default uses GPU if available)
+  --max_gpu_pdb_length MAX_GPU_PDB_LENGTH
+                        Maximum PDB length to embed on GPU (1000), otherwise CPU
+  --multichain_mode     Predicts entire complexes, unsupported and untested
+  --save_embeddings SAVE_EMBEDDINGS
+                        Save embeddings to pdb_dir
+  --web_server_mode     Flag for printing HTML output
+  -v VERBOSE, --verbose VERBOSE
+                        Verbose logging
+
 ```
 
 # DiscoTope-3.0 output
