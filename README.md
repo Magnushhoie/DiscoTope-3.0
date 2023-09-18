@@ -31,7 +31,7 @@ To test the method out without installing it you can try this: [![Open In Colab]
 - [numpy](https://github.com/numpy/numpy)
 - [py-xgboost-gpu](https://xgboost.readthedocs.io/en/stable/install.html)
 
-# Quickstart guide (CPU only)
+# Quickstart guide
 
 ```bash
 # Setup environment and install
@@ -47,7 +47,9 @@ pip install .
 # Unzip models to use
 unzip models.zip
 
-# 1. Predict single PDB (solved structure, run on CPU)
+# 1. Predict single PDB (solved structure)
+python discotope3/main.py --pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb
+# CPU only:
 python discotope3/main.py --cpu_only --pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb
 ```
 
