@@ -201,10 +201,10 @@ python discotope3/main.py \
 
 # Common issues
 
-- No valid amino-acid backbone found: Occurs if only heteroatoms (non-amino acid residues) are found in the extracted chain. DiscoTope-3.0 requires full amino-acid backbone C, Ca and N atoms.
-- PDBConstructionWarning regarding discontinuous chains: Indicates missing residue atoms in the input PDB file. May impact DiscoTope-3.0 performance (solved structures only)
-- Biopython future deprecation warning: Benign Biopython library warning, does not impact predictions
-- ESM regression weights missing warning: Benign fair-esm library warning, does not impact predictions
+- **No valid amino-acid backbone found"** - DiscoTope-3.0 only predicts epitopes on amino-acids, not on non-amino acid entities like heteroatoms (e.g. water, solvents like dimethyl sulfoxide). These chains should not be specified as input. 
+- **PDBConstructionWarning regarding discontinuous chains** - Common issue with solved PDB files missing co-ordinates for some atoms. As long as no backbone co-ordinates (C, Ca, N) are missing, it does not impact predictions.´ (solved structures only)
+- **Biopython future deprecation warning** - Does not impact predictions (Benign Biopython library warning)
+- **ESM regression weights missing warning** - Does not impact predictions (Benign fair-esm library warning)
 
 ## Installation gcc or g++ errors, missing torch-scatter build ...
 ```bash
