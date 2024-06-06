@@ -5,13 +5,12 @@ The tool accepts both solved and predicted structures in the PDB format, and out
 
 - Paper: [10.3389/fimmu.2024.1322712](https://www.frontiersin.org/journals/immunology/articles/10.3389/fimmu.2024.1322712/full)
 - Datasets: [https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0](https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0)
-- Web server DTU: [https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0](https://services.healthtech.dtu.dk/services/DiscoTope-3.0/)
-- Mirror (BioLib): [https://biolib.com/DTU/DiscoTope-3/](https://biolib.com/DTU/DiscoTope-3/)
+- Web server (DTU): [https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0](https://services.healthtech.dtu.dk/services/DiscoTope-3.0/)
+- Web server (BioLib): [https://biolib.com/DTU/DiscoTope-3/](https://biolib.com/DTU/DiscoTope-3/)
+- Google Colab:  [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1sMmzzno5fAeGb-r0D7R6lqo9Tld9LYiq)
 
-# Webserver & Colab
+# Webserver
 To try DiscoTope-3.0 without installing it, please see our [DTU Healthtech webserver](https://services.healthtech.dtu.dk/services/DiscoTope-3.0/)
-
-You can also try this Google Colab: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1sMmzzno5fAeGb-r0D7R6lqo9Tld9LYiq)
 
 # Repo contents
 - [data](./data): Example input files, including test set
