@@ -199,7 +199,7 @@ python discotope3/main.py \
 --out_dir output/test_set_af2
 ```
 
-# Common issues
+# Troubleshooting
 
 - **No valid amino-acid backbone found"** - DiscoTope-3.0 only predicts epitopes on amino-acids, not on non-amino acid entities like heteroatoms (e.g. water, solvents like dimethyl sulfoxide). These chains should not be specified as input. 
 - **PDBConstructionWarning regarding discontinuous chains** - Common issue with some PDB files (experimental structures only) missing co-ordinates for some atoms. As long as no backbone co-ordinates (C, Ca, N) are missing, it does not impact predictions.
