@@ -1,35 +1,15 @@
 # Overview
 
-[DiscoTope-3.0](https://services.healthtech.dtu.dk/services/DiscoTope-3.0/) is a structure-based B-cell epitope prediction tool, exploiting inverse folding latent representations from the [ESM-IF1](https://github.com/facebookresearch/esm) model. The tool accepts input protein structures in the [PDB](https://en.wikipedia.org/wiki/Protein_Data_Bank_(file_format)) format (solved or predicted), and outputs per-residue epitope propensity scores in both a PDB and CSV format.
+DiscoTope-3.0 predicts epitopes on input protein structures, using inverse folding representations from the [ESM-IF1](https://github.com/facebookresearch/esm) model.
+The tool accepts both solved and predicted structures in the PDB format, and outputs per-residue epitope propensity scores in a CSV format.
 
-DiscoTope-3.0 accepts both experimental and AlphaFold2 modeled structures, with similar performance for both. It has been trained and validated only on single chain structures.
-
-- Paper: [10.1101/2023.02.05.527174](https://www.biorxiv.org/content/10.1101/2023.02.05.527174v1)
-- Datasets: https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0
-- Web server DTU: https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0
-- Web server BioLib: https://biolib.com/DTU/DiscoTope-3/
+- Paper: [10.3389/fimmu.2024.1322712](https://www.frontiersin.org/journals/immunology/articles/10.3389/fimmu.2024.1322712/full)
+- Datasets: [https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0](https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0)
+- Web server DTU: [https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0](https://services.healthtech.dtu.dk/services/DiscoTope-3.0/)
+- Mirror (BioLib): [https://biolib.com/DTU/DiscoTope-3/](https://biolib.com/DTU/DiscoTope-3/)
 
 # Colab
 To test the method out without installing it you can try this: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1sMmzzno5fAeGb-r0D7R6lqo9Tld9LYiq)
-
-# Repo contents
-
-- [data](./data): Example input files, including test set
-- [discotope3](./discotope3): Source code
-- [output](./output): DiscoTope-3.0 output examples
-
-### Recommended system requirements
-- GPU is optional. Recommended 16 GB ram, 2+ cores CPU.
-- Linux operating system (e.g. Ubuntu 18.04), but works on MacOS
-- [Python 3.9](https://www.python.org/downloads/)
-- [Pytorch 1.11](https://pytorch.org/get-started/locally/)
-- [cudatoolkit 11.3](https://anaconda.org/anaconda/cudatoolkit)
-- [Pytorch geometric 2.0.4](https://github.com/pyg-team/pytorch_geometric)
-- [Biopython](https://github.com/biopython/biopython)
-- [Biotite](https://github.com/biotite-dev/biotite)
-- [pandas](https://github.com/pandas-dev/pandas)
-- [numpy](https://github.com/numpy/numpy)
-- [py-xgboost-gpu](https://xgboost.readthedocs.io/en/stable/install.html)
 
 # Quickstart guide
 
@@ -52,6 +32,12 @@ python discotope3/main.py --pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb
 # CPU only:
 python discotope3/main.py --cpu_only --pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb
 ```
+
+# Repo contents
+
+- [data](./data): Example input files, including test set
+- [discotope3](./discotope3): Source code
+- [output](./output): DiscoTope-3.0 output examples
 
 # Installation guide
 
@@ -79,6 +65,20 @@ pip install .
 pip install -r requirements_recommended.txt
 pip install .
 ```
+
+### Recommended system requirements
+- GPU is optional. Recommended 16 GB ram, 2+ cores CPU.
+- Linux operating system (e.g. Ubuntu 18.04), but works on MacOS
+- [Python 3.9](https://www.python.org/downloads/)
+- [Pytorch 1.11](https://pytorch.org/get-started/locally/)
+- [cudatoolkit 11.3](https://anaconda.org/anaconda/cudatoolkit)
+- [Pytorch geometric 2.0.4](https://github.com/pyg-team/pytorch_geometric)
+- [Biopython](https://github.com/biopython/biopython)
+- [Biotite](https://github.com/biotite-dev/biotite)
+- [pandas](https://github.com/pandas-dev/pandas)
+- [numpy](https://github.com/numpy/numpy)
+- [py-xgboost-gpu](https://xgboost.readthedocs.io/en/stable/install.html)
+
 
 ## Running DiscoTope-3.0
 
