@@ -8,8 +8,15 @@ The tool accepts both solved and predicted structures in the PDB format, and out
 - Web server DTU: [https://services.healthtech.dtu.dk/service.php?DiscoTope-3.0](https://services.healthtech.dtu.dk/services/DiscoTope-3.0/)
 - Mirror (BioLib): [https://biolib.com/DTU/DiscoTope-3/](https://biolib.com/DTU/DiscoTope-3/)
 
-# Colab
-To test the method out without installing it you can try this: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1sMmzzno5fAeGb-r0D7R6lqo9Tld9LYiq)
+# Webserver & Colab
+To try DiscoTope-3.0 without installing it, please see our [DTU Healthtech webserver](https://services.healthtech.dtu.dk/services/DiscoTope-3.0/)
+
+You can also try this Google Colab: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1sMmzzno5fAeGb-r0D7R6lqo9Tld9LYiq)
+
+# Repo contents
+- [data](./data): Example input files, including test set
+- [discotope3](./discotope3): Source code
+- [output](./output): DiscoTope-3.0 output examples
 
 # Quickstart guide
 
@@ -32,12 +39,6 @@ python discotope3/main.py --pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb
 # CPU only:
 python discotope3/main.py --cpu_only --pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb
 ```
-
-# Repo contents
-
-- [data](./data): Example input files, including test set
-- [discotope3](./discotope3): Source code
-- [output](./output): DiscoTope-3.0 output examples
 
 # Installation guide
 
