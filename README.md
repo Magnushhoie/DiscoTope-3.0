@@ -219,8 +219,22 @@ sudo apt-get install gcc g++
 pip install pybind11
 ```
 
-# Citation
-For usage of the package and associated manuscript, please cite according to the enclosed [citation.bib](./citation.bib).
+## Citing this work
+
+The code and data in this package is based on the following paper <a href="https://www.frontiersin.org/journals/immunology/articles/10.3389/fimmu.2024.1322712/full">DiscoTope-3.0</a>. If you use it, please cite:
+
+```tex
+@ARTICLE{discotope3,
+        AUTHOR={Høie, Magnus Haraldson  and Gade, Frederik Steensgaard  and Johansen, Julie Maria  and Würtzen, Charlotte  and Winther, Ole  and Nielsen, Morten  and Marcatili, Paolo },
+        TITLE={DiscoTope-3.0: improved B-cell epitope prediction using inverse folding latent representations},
+        JOURNAL={Frontiers in Immunology},
+        VOLUME={15},
+        YEAR={2024},
+        URL={https://www.frontiersin.org/journals/immunology/articles/10.3389/fimmu.2024.1322712},
+        DOI={10.3389/fimmu.2024.1322712},
+        ISSN={1664-3224},
+}
+```
 
 # License
 
