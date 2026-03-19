@@ -66,21 +66,23 @@ Set the --struc_type parameter to 'solved' for experimentally solved structures 
 
 Note that DiscoTope-3.0 splits PDB structures into single chains before prediction, unless --multi_chain_mode is set.
 
+Predict single PDB (solved)
 ```bash
-# Unzip models
-unzip models.zip
-
-# Now select one of multiple options:
-
-# 1. Predict single PDB (solved)
 python discotope3/main.py --pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb
+```
 
-# 2. Predict AlphaFold structure
+Predict AlphaFold structure
+```bash
 python discotope3/main.py --pdb_or_zip_file data/example_pdbs_alphafold/7tdm_B.pdb --struc_type alphafold
+```
 
-# 3. Predict a folder of PDBs
+Predict a folder of PDBs
+```bash
 python discotope3/main.py --pdb_dir data/example_pdbs_solved --out_dir output/example_pdbs_solved
+```
 
+More examples:
+```bash
 # 4. Predict a ZIP file of PDBs
 python discotope3/main.py --pdb_or_zip_file pdbs_in_zipfile.zip --out_dir output/pdbs_in_zipfile
 
@@ -89,7 +91,9 @@ python discotope3/main.py --list_file pdb_list_solved.txt --struc_type solved --
 
 # 6. Fetch PDBs from Alphafolddb
 python discotope3/main.py --list_file pdb_list_af2.txt --struc_type alphafold --out_dir output/pdb_list_af2
+```
 
+```bash
 Predict B-cell epitope propensity on input protein PDB structures
 
 optional arguments:
@@ -119,7 +123,6 @@ optional arguments:
   --web_server_mode     Flag for printing HTML output
   -v VERBOSE, --verbose VERBOSE
                         Verbose logging
-
 ```
 
 # DiscoTope-3.0 output
