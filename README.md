@@ -20,23 +20,15 @@ To try DiscoTope-3.0 without installing it, please see our [DTU Healthtech webse
 # Quickstart guide
 
 ```bash
-# Setup environment and install
-conda create --name inverse python=3.9 -y
-conda activate inverse
-conda install -c pyg pyg -y
-conda install -c conda-forge pip -y
-
-git clone https://github.com/Magnushhoie/discotope3_web/
-cd discotope3_web/
+git clone https://github.com/Magnushhoie/DiscoTope-3.0/ && cd DiscoTope-3.0/
+pip install -r requirements.txt
 pip install .
 
 # Unzip models to use
 unzip models.zip
 
-# 1. Predict single PDB (solved structure)
+# Predict single PDB (solved structure)
 python discotope3/main.py --pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb
-# CPU only:
-python discotope3/main.py --cpu_only --pdb_or_zip_file data/example_pdbs_solved/7c4s.pdb
 ```
 
 # Installation guide
