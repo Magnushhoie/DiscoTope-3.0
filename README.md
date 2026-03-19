@@ -93,38 +93,6 @@ python discotope3/main.py --list_file pdb_list_solved.txt --struc_type solved --
 python discotope3/main.py --list_file pdb_list_af2.txt --struc_type alphafold --out_dir output/pdb_list_af2
 ```
 
-```bash
-Predict B-cell epitope propensity on input protein PDB structures
-
-optional arguments:
-  -h, --help            show this help message and exit
-  -f PDB_OR_ZIP_FILE, --pdb_or_zip_file PDB_OR_ZIP_FILE
-                        Input file, either single PDB or compressed zip file with multiple PDBs
-  --list_file LIST_FILE
-                        File with PDB or Uniprot IDs, fetched from RCSB/AlphaFolddb
-  --struc_type STRUC_TYPE
-                        Structure type from file (solved | alphafold)
-  --pdb_dir PDB_DIR     Directory with AF2 PDBs
-  --out_dir OUT_DIR     Job output directory
-  --models_dir MODELS_DIR
-                        Path for .json files containing trained XGBoost ensemble
-  --calibrated_score_epi_threshold CALIBRATED_SCORE_EPI_THRESHOLD
-                        Calibrated-score threshold for epitopes [low 0.40, moderate (0.90), higher 1.50]
-  --no_calibrated_normalization
-                        Skip Calibrated-normalization of PDBs
-  --check_existing_embeddings CHECK_EXISTING_EMBEDDINGS
-                        Check for existing embeddings to load in pdb_dir
-  --cpu_only            Use CPU even if GPU is available (default uses GPU if available)
-  --max_gpu_pdb_length MAX_GPU_PDB_LENGTH
-                        Maximum PDB length to embed on GPU (1000), otherwise CPU
-  --multichain_mode     Predicts entire complexes, unsupported and untested
-  --save_embeddings SAVE_EMBEDDINGS
-                        Save embeddings to pdb_dir
-  --web_server_mode     Flag for printing HTML output
-  -v VERBOSE, --verbose VERBOSE
-                        Verbose logging
-```
-
 # DiscoTope-3.0 output
 
 DiscoTope-3.0 splits input PDBs into single-chain PDB files, then predict per-residue epitope propensity scores.
@@ -163,6 +131,40 @@ ATOM      1  N   GLY A  14     -16.773 -32.069  23.105  1.00 15.19           N
 ATOM      2  CA  GLY A  14     -15.595 -32.029  23.955  1.00 15.19           C  
 ATOM      3  C   GLY A  14     -14.287 -31.844  23.204  1.00 15.19           C  
 ATOM      4  O   GLY A  14     -13.284 -32.465  23.555  1.00 15.19           O  
+```
+
+# Documentation
+
+```bash
+Predict B-cell epitope propensity on input protein PDB structures
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -f PDB_OR_ZIP_FILE, --pdb_or_zip_file PDB_OR_ZIP_FILE
+                        Input file, either single PDB or compressed zip file with multiple PDBs
+  --list_file LIST_FILE
+                        File with PDB or Uniprot IDs, fetched from RCSB/AlphaFolddb
+  --struc_type STRUC_TYPE
+                        Structure type from file (solved | alphafold)
+  --pdb_dir PDB_DIR     Directory with AF2 PDBs
+  --out_dir OUT_DIR     Job output directory
+  --models_dir MODELS_DIR
+                        Path for .json files containing trained XGBoost ensemble
+  --calibrated_score_epi_threshold CALIBRATED_SCORE_EPI_THRESHOLD
+                        Calibrated-score threshold for epitopes [low 0.40, moderate (0.90), higher 1.50]
+  --no_calibrated_normalization
+                        Skip Calibrated-normalization of PDBs
+  --check_existing_embeddings CHECK_EXISTING_EMBEDDINGS
+                        Check for existing embeddings to load in pdb_dir
+  --cpu_only            Use CPU even if GPU is available (default uses GPU if available)
+  --max_gpu_pdb_length MAX_GPU_PDB_LENGTH
+                        Maximum PDB length to embed on GPU (1000), otherwise CPU
+  --multichain_mode     Predicts entire complexes, unsupported and untested
+  --save_embeddings SAVE_EMBEDDINGS
+                        Save embeddings to pdb_dir
+  --web_server_mode     Flag for printing HTML output
+  -v VERBOSE, --verbose VERBOSE
+                        Verbose logging
 ```
 
 ## Reproduce test-set predictions (AlphaFold2 structures)
