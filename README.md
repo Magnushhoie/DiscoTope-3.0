@@ -45,39 +45,23 @@ We highly recommend using an Ubuntu OS and Conda ([miniconda](https://docs.conda
 
 Predictions are faster using a GPU and the recommended versions of pytorch, pytorch-geometric and cudatoolkit, but these exact versions are not required.
 
-## For Linux & GPU with conda (recommended, ~2 mins) 
-
 ```bash
-# Setup environment with conda
-conda create -n inverse python=3.9
-conda activate inverse
-conda install pytorch=1.11 cudatoolkit=11.3 -c pytorch
-conda install pyg -c pyg -c conda-forge
-conda install pip
-
-# install pip dependencies
-pip install .
-```
-
-## Linux & GPU with pip (~5 mins)
-```bash
-# install pip dependencies
-pip install -r requirements_recommended.txt
+git clone https://github.com/Magnushhoie/DiscoTope-3.0/ && cd DiscoTope-3.0/
+pip install -r requirements.txt
 pip install .
 ```
 
 ### Recommended system requirements
 - GPU is optional. Recommended 16 GB ram, 2+ cores CPU.
 - Linux operating system (e.g. Ubuntu 18.04), but works on MacOS
-- [Python 3.9](https://www.python.org/downloads/)
-- [Pytorch 1.11](https://pytorch.org/get-started/locally/)
-- [cudatoolkit 11.3](https://anaconda.org/anaconda/cudatoolkit)
-- [Pytorch geometric 2.0.4](https://github.com/pyg-team/pytorch_geometric)
-- [Biopython](https://github.com/biopython/biopython)
-- [Biotite](https://github.com/biotite-dev/biotite)
-- [pandas](https://github.com/pandas-dev/pandas)
-- [numpy](https://github.com/numpy/numpy)
-- [py-xgboost-gpu](https://xgboost.readthedocs.io/en/stable/install.html)
+- [Python 3.14](https://www.python.org/downloads/)
+- [Pytorch 2.10](https://pytorch.org/get-started/locally/)
+- [Pytorch geometric 2.7.*](https://github.com/pyg-team/pytorch_geometric)
+- [Biopython 1.86](https://github.com/biopython/biopython)
+- [Biotite 1.6.*](https://github.com/biotite-dev/biotite)
+- [pandas <=3.0.1](https://github.com/pandas-dev/pandas)
+- [numpy <=2.4.3](https://github.com/numpy/numpy)
+- [py-xgboost-gpu <=3.1.2](https://xgboost.readthedocs.io/en/stable/install.html)
 
 
 ## Running DiscoTope-3.0

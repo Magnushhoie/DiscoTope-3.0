@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 import shutil
 
+from discotope3 import make_dataset
+
 ROOT_PATH = Path(os.path.dirname(__file__)).parent
 sys.path.insert(0, ROOT_PATH)
 
@@ -341,7 +343,7 @@ def set_struc_res_bfactor(atom_array, res_values):
     """Set per-residue B-factor of atom_array to res_values (DiscoTope-3.0 predictions)"""
 
     # Get relative indices starting from 1. Copy to avoid modifying original
-    atom_array_renum = biotite.structure.renumber_res_ids(
+    atom_array_renum = make_dataset.renumber_res_ids(
         copy.deepcopy(atom_array), start=1
     )
     atom_array.b_factor = res_values[atom_array_renum.res_id - 1]
@@ -410,7 +412,7 @@ def predict_and_save(
 
     # Round numerical columns to 5 digits for nicer CSV output
     num_cols = ["DiscoTope-3.0_score", "rsa"]
-    df_all[num_cols] = df_all[num_cols].applymap(lambda x: "{:.5f}".format(x))
+    df_all[num_cols] = df_all[num_cols].map(lambda x: "{:.5f}".format(x))
 
     # Keep track of structures for later
     strucs_all = [
@@ -480,7 +482,7 @@ def predict_and_save(
                 struc, df["calibrated_score"].values.astype(float) * 100
             )
 
-        outfile = f"{out_dir}/{_pdb}_discotope3.pdb"
+        outfile = f"{out_dir}/{_pdb}_discotope3.cif"
         strucio.save_structure(outfile, struc_pred)
 
 

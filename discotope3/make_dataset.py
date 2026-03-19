@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 import torch
 # Use Sander values instead
-from biotite.structure import filter_amino_acids, filter_backbone, get_chains
+from biotite.structure import filter_amino_acids, filter_peptide_backbone, get_chains
 from biotite.structure.io import pdb, pdbx
 from joblib import Parallel, delayed
 
@@ -273,7 +273,7 @@ def load_structure_discotope(fpath, chain=None):
                 log.error(f"Unable to read PDB file {fpath}: {E}")
 
     # For IF1 embedding, only backbone is extracted (C, Ca, N atoms)
-    bbmask = filter_backbone(structure_full)
+    bbmask = filter_peptide_backbone(structure_full)
     structure = structure_full[bbmask]
 
     # For "full" structure, extract all (amino-acid residue) atoms
@@ -498,13 +498,38 @@ def get_atomarray_res_sasa(atom_array):
     return res_sasa
 
 
+def renumber_res_ids(array, start=None):
+    """
+    Renumber the residue IDs of the given array.
+
+    Parameters
+    ----------
+    array : AtomArray or AtomArrayStack
+        The array to be checked.
+    start : int, optional
+        The starting index for renumbering.
+        The first ID in the array is taken by default.
+    
+    Returns
+    -------
+    array : AtomArray or AtomArrayStack
+        The renumbered array.
+    """
+    if start is None:
+        start = array.res_id[0]
+    diff = np.diff(array.res_id)
+    diff[diff != 0] = 1
+    new_res_ids =  np.concatenate(([start], diff)).cumsum()
+    array.res_id = new_res_ids
+    return array
+
 def get_atomarray_bfacs(atom_array: biotite.structure.AtomArray) -> np.array:
     """
     Return per-residue B-factors (AF2 confidence) from biotite.structure.AtomArray
     """
 
     # Get relative indices starting from 1. Copy to avoid modifying original
-    atom_array_renum = biotite.structure.renumber_res_ids(
+    atom_array_renum = renumber_res_ids(
         copy.deepcopy(atom_array), start=1
     )
 
