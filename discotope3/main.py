@@ -43,7 +43,7 @@ import requests
 import xgboost as xgb
 from Bio.PDB import PDBIO, Select
 from Bio.PDB.PDBParser import PDBParser
-from make_dataset import Discotope_Dataset_web
+from .make_dataset import Discotope_Dataset_web
 
 
 def cmdline_args():
