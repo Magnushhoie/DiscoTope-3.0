@@ -9,7 +9,7 @@ from typing import Dict, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
-from esm.rotary_embedding import RotaryEmbedding
+from .rotary_embedding import RotaryEmbedding
 from torch import Tensor, nn
 from torch.nn import Parameter
 

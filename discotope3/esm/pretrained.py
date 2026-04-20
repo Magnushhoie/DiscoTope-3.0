@@ -147,9 +147,9 @@ def _load_model_and_alphabet_core_v1(model_data):
         model_type = esm.MSATransformer
 
     elif "invariant_gvp" in model_data["args"].arch:
-        import esm.inverse_folding
+        from . import inverse_folding
 
-        model_type = esm.inverse_folding.gvp_transformer.GVPTransformerModel
+        model_type = inverse_folding.gvp_transformer.GVPTransformerModel
         model_args = vars(model_data["args"])  # convert Namespace -> dict
 
         def update_name(s):

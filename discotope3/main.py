@@ -684,23 +684,33 @@ def get_directory_basename_dict(directory: str, glob_ext: str) -> dict:
 
 
 def report_pdb_input_outputs(pdb_list, in_dir, out_dir) -> None:
-    """Reports missing CSV and PDB file in out_dir, per PDB file in in_dir"""
+    """Reports missing CSV outputs per input PDB chain"""
 
+    # Input chains (split PDBs)
     in_pdbs = glob.glob(f"{in_dir}/*.pdb")
-    out_pdbs = glob.glob(f"{out_dir}/*.pdb")
-
     in_dict = {Path(pdb).stem: pdb for pdb in in_pdbs}
-    out_dict = {re.sub(r"_discotope3$", "", Path(pdb).stem): pdb for pdb in out_pdbs}
 
-    # Report number of input vs outputs
+    # Output CSVs
+    out_csvs = glob.glob(f"{out_dir}/**/*_discotope3.csv", recursive=True)
+
+    # Map output names back to input names
+    # e.g. pred.model_idx_0_A_discotope3.csv -> pred.model_idx_0_A
+    out_dict = {
+        re.sub(r"_discotope3$", "", Path(csv).stem): csv
+        for csv in out_csvs
+    }
+
+    # Report number of outputs
     log.info(
-        f"Predicted {len(out_pdbs)} / {len(in_pdbs)} PDB files extracted from {len(pdb_list)} input PDBs, saved to {out_dir}"
+        f"Predicted {len(out_csvs)} / {len(in_pdbs)} PDB chains extracted from {len(pdb_list)} input PDBs, saved to {out_dir}"
     )
 
+    # Identify missing predictions
     missing_pdbs = in_dict.keys() - out_dict.keys()
+
     if len(missing_pdbs) >= 1:
         log.info(
-            f"Note: Excluded predicting {len(missing_pdbs)} PDB chain(s) (see log file):\n{', '.join(missing_pdbs)}"
+            f"Note: Missing predictions for {len(missing_pdbs)} PDB chain(s):\n{', '.join(sorted(missing_pdbs))}"
         )
 
 

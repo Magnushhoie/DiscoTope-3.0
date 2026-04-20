@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from esm.multihead_attention import MultiheadAttention
+from ..multihead_attention import MultiheadAttention
 from torch import Tensor
 
 
