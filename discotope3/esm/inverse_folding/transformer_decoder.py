@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn as nn
-from esm.modules import SinusoidalPositionalEmbedding
+from ..modules import SinusoidalPositionalEmbedding
 from torch import Tensor
 
 from .transformer_layer import TransformerDecoderLayer

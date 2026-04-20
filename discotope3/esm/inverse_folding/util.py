@@ -17,7 +17,7 @@ from biotite.sequence import ProteinSequence
 from biotite.structure import filter_peptide_backbone, get_chains
 from biotite.structure.io import pdb, pdbx
 from biotite.structure.residues import get_residues
-from esm.data import BatchConverter
+from ..data import BatchConverter
 from scipy.spatial import transform
 from scipy.stats import special_ortho_group
 
