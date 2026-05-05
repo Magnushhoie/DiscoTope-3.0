@@ -14,7 +14,6 @@ from discotope3 import make_dataset
 
 ROOT_PATH = Path(os.path.dirname(__file__)).parent
 sys.path.insert(0, ROOT_PATH)
-import make_dataset
 import warnings
 
 # Ignore Biopython deprecation warnings
