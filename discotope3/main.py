@@ -14,7 +14,6 @@ from discotope3 import make_dataset
 
 ROOT_PATH = Path(os.path.dirname(__file__)).parent
 sys.path.insert(0, ROOT_PATH)
-
 import warnings
 
 # Ignore Biopython deprecation warnings
@@ -43,7 +42,9 @@ import requests
 import xgboost as xgb
 from Bio.PDB import PDBIO, Select
 from Bio.PDB.PDBParser import PDBParser
-from .make_dataset import Discotope_Dataset_web
+from discotope3.make_dataset import Discotope_Dataset_web
+
+
 
 
 def cmdline_args():

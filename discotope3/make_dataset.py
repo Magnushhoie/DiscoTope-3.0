@@ -523,22 +523,13 @@ def renumber_res_ids(array, start=None):
     array.res_id = new_res_ids
     return array
 
+
 def get_atomarray_bfacs(atom_array: biotite.structure.AtomArray) -> np.array:
     """
-    Return per-residue B-factors (AF2 confidence) from biotite.structure.AtomArray
+    Return one B-factor/pLDDT value per residue from biotite.structure.AtomArray
     """
-
-    # Get relative indices starting from 1. Copy to avoid modifying original
-    atom_array_renum = renumber_res_ids(
-        copy.deepcopy(atom_array), start=1
-    )
-
-    # Extract B-factors, map to residues
-    res_idxs_dict = {r: i for i, r in enumerate(atom_array_renum.res_id)}
-    res_idxs_uniq = np.array(list(res_idxs_dict.values()))
-    res_bfacs = atom_array_renum.b_factor[res_idxs_uniq]
-
-    return res_bfacs
+    starts = biotite.structure.residues.get_residue_starts(atom_array)
+    return atom_array.b_factor[starts]
 
 
 def structure_extract_seq_residx_chain_bfac_rsas_diam(struc_full, chain_id):
